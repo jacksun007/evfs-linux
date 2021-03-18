@@ -27,7 +27,7 @@ commands are defined
 
 ## VFS Documentation
 
-Application Level File System Interface: https://www.gnu.org/software/libc/manual/html_node/File-System-Interface.html
-Overview of the Linux Virtual File System: https://www.kernel.org/doc/html/latest/filesystems/vfs.html
+* Application Level File System Interface: https://www.gnu.org/software/libc/manual/html_node/File-System-Interface.html
+* Overview of the Linux Virtual File System: https://www.kernel.org/doc/html/latest/filesystems/vfs.html
 
 
