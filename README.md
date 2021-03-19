@@ -7,7 +7,7 @@ Paper link: https://www.usenix.org/system/files/conference/hotstorage18/hotstora
 
 Clone the repository with the following command:
 
-`git clone --single-branch --branch main git@github.com:jacksun007/evfs-linux.git`
+`git clone --depth 1 --single-branch --branch main git@github.com:jacksun007/evfs-linux.git`
 
 The above will make sure you only clone our active branch. Otherwise it may
 take a very long time cloning the entire history of Linux.
