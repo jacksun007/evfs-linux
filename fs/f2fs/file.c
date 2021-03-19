@@ -817,11 +817,14 @@ static int fill_zero(struct inode *inode, pgoff_t index,
 
 int truncate_hole(struct inode *inode, pgoff_t pg_start, pgoff_t pg_end)
 {
+	struct f2fs_node *raw_node;
 	int err;
 
 	while (pg_start < pg_end) {
 		struct dnode_of_data dn;
-		pgoff_t end_offset, count;
+		pgoff_t end_offset, count, len;
+		__le32 *addr;
+		int ofs;
 
 		set_new_dnode(&dn, inode, NULL, NULL, 0);
 		err = get_dnode_of_data(&dn, pg_start, LOOKUP_NODE);
@@ -833,17 +836,60 @@ int truncate_hole(struct inode *inode, pgoff_t pg_start, pgoff_t pg_end)
 			return err;
 		}
 
+		ofs = dn.ofs_in_node;
 		end_offset = ADDRS_PER_PAGE(dn.node_page, inode);
-		count = min(end_offset - dn.ofs_in_node, pg_end - pg_start);
+		len = count = min(end_offset - dn.ofs_in_node, pg_end - pg_start);
 
 		f2fs_bug_on(F2FS_I_SB(inode), count == 0 || count > end_offset);
+
+		raw_node = F2FS_NODE(dn.node_page);
+		addr = blkaddr_in_node(raw_node) + ofs;
 
 		truncate_data_blocks_range(&dn, count);
 		f2fs_put_dnode(&dn);
 
-		pg_start += count;
+		pg_start += len;
 	}
 	return 0;
+}
+
+void unmap_block(struct inode *inode, pgoff_t pgofs)
+{
+	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
+	struct f2fs_node *raw_node;
+	struct dnode_of_data dn;
+	__le32 *addr;
+	block_t blkaddr;
+	pgoff_t fofs;
+	loff_t ofs, end_ofs;
+	int err;
+
+	set_new_dnode(&dn, inode, NULL, NULL, 0);
+	err = get_dnode_of_data(&dn, pgofs, LOOKUP_NODE);
+	if (err)
+		return;
+
+	ofs = dn.ofs_in_node;
+	end_ofs = ADDRS_PER_PAGE(dn.node_page, inode);
+
+	raw_node = F2FS_NODE(dn.node_page);
+	addr = blkaddr_in_node(raw_node) + ofs;
+	blkaddr = le32_to_cpu(*addr);
+	if (blkaddr == NULL_ADDR)
+		return;
+
+	dn.data_blkaddr = NULL_ADDR;
+	set_data_blkaddr(&dn);
+	if (dn.ofs_in_node == 0 && IS_INODE(dn.node_page))
+		clear_inode_flag(dn.inode, FI_FIRST_BLOCK_WRITTEN);
+
+	fofs = start_bidx_of_node(ofs_of_node(dn.node_page), dn.inode) + ofs;
+	f2fs_update_extent_cache_range(&dn, fofs, 0, 1);
+	dec_valid_block_count(sbi, dn.inode, 1);
+
+	dn.ofs_in_node = ofs;
+	f2fs_update_time(sbi, REQ_TIME);
+	f2fs_put_dnode(&dn);
 }
 
 static int punch_hole(struct inode *inode, loff_t offset, loff_t len)
@@ -2427,7 +2473,7 @@ long f2fs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case F2FS_IOC_FLUSH_DEVICE:
 		return f2fs_ioc_flush_device(filp, arg);
 	default:
-		return -ENOTTY;
+		return f2fs_evfs_ioctl(filp, cmd, arg);
 	}
 }
 

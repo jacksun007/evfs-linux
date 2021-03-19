@@ -2183,6 +2183,8 @@ int truncate_data_blocks_range(struct dnode_of_data *dn, int count);
 long f2fs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 long f2fs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 
+void unmap_block(struct inode *inode, pgoff_t pgofs);
+
 /*
  * inode.c
  */
@@ -2364,6 +2366,8 @@ int build_segment_manager(struct f2fs_sb_info *sbi);
 void destroy_segment_manager(struct f2fs_sb_info *sbi);
 int __init create_segment_manager_caches(void);
 void destroy_segment_manager_caches(void);
+int reserve_extents(struct f2fs_sb_info *sbi, block_t start,
+		block_t length, int use_hint);
 
 /*
  * checkpoint.c
@@ -2730,6 +2734,11 @@ int __init f2fs_register_sysfs(void);
 void f2fs_unregister_sysfs(void);
 int f2fs_init_sysfs(struct f2fs_sb_info *sbi);
 void f2fs_exit_sysfs(struct f2fs_sb_info *sbi);
+
+/*
+ * evfs.c
+ */
+long f2fs_evfs_ioctl(struct file *flip, unsigned int cmd, unsigned long arg);
 
 /*
  * crypto support

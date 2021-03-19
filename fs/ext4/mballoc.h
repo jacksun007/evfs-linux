@@ -215,3 +215,89 @@ ext4_mballoc_query_range(
 	void				*priv);
 
 #endif
+
+static inline void *mb_correct_addr_and_bit(int *bit, void *addr)
+{
+#if BITS_PER_LONG == 64
+	*bit += ((unsigned long) addr & 7UL) << 3;
+	addr = (void *) ((unsigned long) addr & ~7UL);
+#elif BITS_PER_LONG == 32
+	*bit += ((unsigned long) addr & 3UL) << 3;
+	addr = (void *) ((unsigned long) addr & ~3UL);
+#else
+#error "how many bits you are?!"
+#endif
+	return addr;
+}
+
+static inline int mb_test_bit(int bit, void *addr)
+{
+	/*
+	 * ext4_test_bit on architecture like powerpc
+	 * needs unsigned long aligned address
+	 */
+	addr = mb_correct_addr_and_bit(&bit, addr);
+	return ext4_test_bit(bit, addr);
+}
+
+static inline void mb_set_bit(int bit, void *addr)
+{
+	addr = mb_correct_addr_and_bit(&bit, addr);
+	ext4_set_bit(bit, addr);
+}
+
+static inline void mb_clear_bit(int bit, void *addr)
+{
+	addr = mb_correct_addr_and_bit(&bit, addr);
+	ext4_clear_bit(bit, addr);
+}
+
+static inline int mb_test_and_clear_bit(int bit, void *addr)
+{
+	addr = mb_correct_addr_and_bit(&bit, addr);
+	return ext4_test_and_clear_bit(bit, addr);
+}
+
+static inline int mb_find_next_zero_bit(void *addr, int max, int start)
+{
+	int fix = 0, ret, tmpmax;
+	addr = mb_correct_addr_and_bit(&fix, addr);
+	tmpmax = max + fix;
+	start += fix;
+
+	ret = ext4_find_next_zero_bit(addr, tmpmax, start) - fix;
+	if (ret > max)
+		return max;
+	return ret;
+}
+
+static inline int mb_find_next_bit(void *addr, int max, int start)
+{
+	int fix = 0, ret, tmpmax;
+	addr = mb_correct_addr_and_bit(&fix, addr);
+	tmpmax = max + fix;
+	start += fix;
+
+	ret = ext4_find_next_bit(addr, tmpmax, start) - fix;
+	if (ret > max)
+		return max;
+	return ret;
+}
+
+static void mb_clear_bits(void *bm, int cur, int len)
+{
+	__u32 *addr;
+
+	len = cur + len;
+	while (cur < len) {
+		if ((cur & 31) == 0 && (len - cur) >= 32) {
+			/* fast path: clear whole word at once */
+			addr = bm + (cur >> 3);
+			*addr = 0;
+			cur += 32;
+			continue;
+		}
+		mb_clear_bit(cur, bm);
+		cur++;
+	}
+}

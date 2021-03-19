@@ -742,7 +742,7 @@ out:
  */
 struct inode *__ext4_new_inode(handle_t *handle, struct inode *dir,
 			       umode_t mode, const struct qstr *qstr,
-			       __u32 goal, uid_t *owner, __u32 i_flags,
+			       __u32 goal, bool require_goal, uid_t *owner, __u32 i_flags,
 			       int handle_type, unsigned int line_no,
 			       int nblocks)
 {
@@ -921,19 +921,29 @@ repeat_in_this_group:
 		ino = ext4_find_next_zero_bit((unsigned long *)
 					      inode_bitmap_bh->b_data,
 					      EXT4_INODES_PER_GROUP(sb), ino);
-		if (ino >= EXT4_INODES_PER_GROUP(sb))
+
+    if (ino >= EXT4_INODES_PER_GROUP(sb)) {
 			goto next_group;
+    }
+
 		if (group == 0 && (ino+1) < EXT4_FIRST_INO(sb)) {
 			ext4_error(sb, "reserved inode found cleared - "
 				   "inode=%lu", ino + 1);
 			continue;
 		}
-		if ((EXT4_SB(sb)->s_journal == NULL) &&
+
+    if ((EXT4_SB(sb)->s_journal == NULL) &&
 		    recently_deleted(sb, group, ino)) {
 			ino++;
 			goto next_inode;
 		}
-		if (!handle) {
+
+    if (require_goal && goal && ino + 1 != goal) {
+		  err = -EEXIST;
+      goto out;
+    }
+
+    if (!handle) {
 			BUG_ON(nblocks <= 0);
 			handle = __ext4_journal_start_sb(dir->i_sb, line_no,
 							 handle_type, nblocks,
@@ -950,6 +960,7 @@ repeat_in_this_group:
 			ext4_std_error(sb, err);
 			goto out;
 		}
+
 		ext4_lock_group(sb, group);
 		ret2 = ext4_test_and_set_bit(ino, inode_bitmap_bh->b_data);
 		ext4_unlock_group(sb, group);

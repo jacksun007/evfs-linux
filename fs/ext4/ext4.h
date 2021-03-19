@@ -2409,19 +2409,23 @@ extern int ext4fs_dirhash(const char *name, int len, struct
 
 /* ialloc.c */
 extern struct inode *__ext4_new_inode(handle_t *, struct inode *, umode_t,
-				      const struct qstr *qstr, __u32 goal,
+				      const struct qstr *qstr, __u32 goal, bool require_goal,
 				      uid_t *owner, __u32 i_flags,
 				      int handle_type, unsigned int line_no,
 				      int nblocks);
 
 #define ext4_new_inode(handle, dir, mode, qstr, goal, owner, i_flags) \
-	__ext4_new_inode((handle), (dir), (mode), (qstr), (goal), (owner), \
+	__ext4_new_inode((handle), (dir), (mode), (qstr), (goal), false, (owner), \
 			 i_flags, 0, 0, 0)
 #define ext4_new_inode_start_handle(dir, mode, qstr, goal, owner, \
 				    type, nblocks)		    \
-	__ext4_new_inode(NULL, (dir), (mode), (qstr), (goal), (owner), \
+	__ext4_new_inode(NULL, (dir), (mode), (qstr), (goal), false, (owner), \
 			 0, (type), __LINE__, (nblocks))
-
+// TODO(tbrindus): this is a terrible name.
+#define ext4_new_inode_start_handle1(dir, mode, qstr, goal, owner, \
+				    type, nblocks)		    \
+	__ext4_new_inode(NULL, (dir), (mode), (qstr), (goal), true, (owner), \
+			 0, (type), __LINE__, (nblocks))
 
 extern void ext4_free_inode(handle_t *, struct inode *);
 extern struct inode * ext4_orphan_get(struct super_block *, unsigned long);
@@ -2537,6 +2541,17 @@ extern int ext4_ext_migrate(struct inode *);
 extern int ext4_ind_migrate(struct inode *inode);
 
 /* namei.c */
+int ext4_add_entry_under_inode(handle_t *handle, struct inode *dir,
+		char *name, struct inode *inode);
+extern struct buffer_head * ext4_find_entry (struct inode *dir,
+					const struct qstr *d_name,
+					struct ext4_dir_entry_2 **res_dir,
+					int *inlined);
+extern void ext4_inc_count(handle_t *handle, struct inode *inode);
+extern int ext4_delete_entry(handle_t *handle,  struct inode *dir,
+		struct ext4_dir_entry_2 *de_del, struct buffer_head *bh);
+extern int ext4_add_entry(handle_t *handle, struct dentry *dentry,
+			  struct inode *inode);
 extern int ext4_dirent_csum_verify(struct inode *inode,
 				   struct ext4_dir_entry *dirent);
 extern int ext4_orphan_add(handle_t *, struct inode *);
@@ -2568,6 +2583,8 @@ extern int ext4_group_extend(struct super_block *sb,
 extern int ext4_resize_fs(struct super_block *sb, ext4_fsblk_t n_blocks_count);
 
 /* super.c */
+extern void ext4_destroy_inode(struct inode *inode);
+extern struct inode *ext4_alloc_inode(struct super_block *sb);
 extern int ext4_seq_options_show(struct seq_file *seq, void *offset);
 extern int ext4_calculate_overhead(struct super_block *sb);
 extern void ext4_superblock_csum_set(struct super_block *sb);

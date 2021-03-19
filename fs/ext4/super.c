@@ -959,7 +959,7 @@ static struct kmem_cache *ext4_inode_cachep;
 /*
  * Called inside transaction, so use GFP_NOFS
  */
-static struct inode *ext4_alloc_inode(struct super_block *sb)
+struct inode *ext4_alloc_inode(struct super_block *sb)
 {
 	struct ext4_inode_info *ei;
 
@@ -1009,7 +1009,7 @@ static void ext4_i_callback(struct rcu_head *head)
 	kmem_cache_free(ext4_inode_cachep, EXT4_I(inode));
 }
 
-static void ext4_destroy_inode(struct inode *inode)
+void ext4_destroy_inode(struct inode *inode)
 {
 	if (!list_empty(&(EXT4_I(inode)->i_orphan))) {
 		ext4_msg(inode->i_sb, KERN_ERR,

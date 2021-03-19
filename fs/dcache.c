@@ -941,6 +941,22 @@ struct dentry *d_find_alias(struct inode *inode)
 }
 EXPORT_SYMBOL(d_find_alias);
 
+/* Remove the entry from the dentry cache with the given name and under the
+ * given directory inode.
+ */
+void d_drop_entry_in_dir(struct inode *dir, struct qstr *name) {
+	struct dentry *dir_dentry;
+	struct dentry *target_dentry;
+
+	if (hlist_empty(&dir->i_dentry)) return;
+
+	dir_dentry = hlist_entry(dir->i_dentry.first, struct dentry, d_u.d_alias);
+	target_dentry = d_hash_and_lookup(dir_dentry, name);
+
+	if (target_dentry) d_drop(target_dentry);
+}
+EXPORT_SYMBOL(d_drop_entry_in_dir);
+
 /*
  *	Try to kill dentries associated with this inode.
  * WARNING: you must own a reference to inode.

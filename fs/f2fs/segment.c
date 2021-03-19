@@ -2166,6 +2166,74 @@ static int __get_segment_type(struct f2fs_io_info *fio)
 	return type;
 }
 
+/* Walks through length number of blocks and flips the sit valid map to on.
+ * If use_hint = 1:
+ *     Start from at block number "start" and reserve length many blocks.
+ *     Usage of hint implies that this range of blocks are unallocated.
+ * If use_hint = 0:
+ *     Use the segment's next_blkoff to determine where to start. */
+int reserve_extents(struct f2fs_sb_info *sbi, block_t start,
+		block_t length, int use_hint)
+{
+	unsigned int segno, old_segno;
+	struct sit_info *sit_i = SIT_I(sbi);
+	struct seg_entry *se;
+	struct curseg_info *curseg;
+	block_t blk_addr = start, blkoff = 0;
+	int ret = 0;
+
+	/*
+	 * If the given block address is invalid, and use_hint is not
+	 * enabled, use the F2FS default segment (WARM_DATA) to
+	 * allocate extent. If the use_hint is enabled, returns an error
+	 */
+	if (blk_addr < SEG0_BLKADDR(sbi)) {
+		if (use_hint)
+			return -EFAULT;
+		curseg = CURSEG_I(sbi, CURSEG_WARM_DATA);
+		start = blk_addr = START_BLOCK(sbi, curseg->segno) +
+			curseg->next_blkoff;
+	}
+
+	for (; blk_addr < start + length; blk_addr++) {
+		segno = old_segno = GET_SEGNO(sbi, blk_addr);
+		se = get_seg_entry(sbi, segno);
+		curseg = CURSEG_I(sbi, se->type);
+		blkoff = GET_BLKOFF_FROM_SEG0(sbi, blkoff);
+
+		mutex_lock(&curseg->curseg_mutex);
+		mutex_lock(&sit_i->sentry_lock);
+
+		/* change the current segment */
+		if (segno != curseg->segno) {
+			old_segno = curseg->segno;
+			curseg->next_segno = segno;
+			change_curseg(sbi, se->type, true);
+		}
+
+		if (!use_hint)
+			blk_addr = START_BLOCK(sbi, segno) +
+				curseg->next_blkoff;
+
+		if (!ret)
+			ret = start;
+		update_sit_entry(sbi, blk_addr, 1);
+		__next_free_blkoff(sbi, curseg,
+				curseg->next_blkoff + 1);
+
+		/* change the current segment back */
+		if (old_segno != segno) {
+			curseg->next_segno = old_segno;
+			change_curseg(sbi, se->type, true);
+		}
+
+		mutex_unlock(&sit_i->sentry_lock);
+		mutex_unlock(&curseg->curseg_mutex);
+	}
+
+	return ret;
+}
+
 void allocate_data_block(struct f2fs_sb_info *sbi, struct page *page,
 		block_t old_blkaddr, block_t *new_blkaddr,
 		struct f2fs_summary *sum, int type,

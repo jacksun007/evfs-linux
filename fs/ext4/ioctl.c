@@ -583,6 +583,9 @@ static int ext4_ioc_getfsmap(struct super_block *sb,
 	return 0;
 }
 
+extern long
+ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
 long ext4_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
@@ -1037,8 +1040,11 @@ resizefs_out:
 	case EXT4_IOC_SHUTDOWN:
 		return ext4_shutdown(sb, arg);
 	default:
-		return -ENOTTY;
+		return ext4_evfs_ioctl(filp, cmd, arg);
+		// 
 	}
+	
+	return -ENOTTY;
 }
 
 #ifdef CONFIG_COMPAT
@@ -1106,7 +1112,7 @@ long ext4_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case FS_IOC_GETFSMAP:
 		break;
 	default:
-		return -ENOIOCTLCMD;
+		return ext4_evfs_ioctl(file, cmd, (unsigned long) compat_ptr(arg));
 	}
 	return ext4_ioctl(file, cmd, (unsigned long) compat_ptr(arg));
 }

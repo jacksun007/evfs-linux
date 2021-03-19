@@ -1334,7 +1334,7 @@ static int is_dx_internal_node(struct inode *dir, ext4_lblk_t block,
  * The returned buffer_head has ->b_count elevated.  The caller is expected
  * to brelse() it when appropriate.
  */
-static struct buffer_head * ext4_find_entry (struct inode *dir,
+struct buffer_head * ext4_find_entry (struct inode *dir,
 					const struct qstr *d_name,
 					struct ext4_dir_entry_2 **res_dir,
 					int *inlined)
@@ -2030,7 +2030,7 @@ out_frames:
  * may not sleep between calling this and putting something into
  * the entry, as someone else might have used it while you slept.
  */
-static int ext4_add_entry(handle_t *handle, struct dentry *dentry,
+int ext4_add_entry(handle_t *handle, struct dentry *dentry,
 			  struct inode *inode)
 {
 	struct inode *dir = d_inode(dentry->d_parent);
@@ -2054,6 +2054,98 @@ static int ext4_add_entry(handle_t *handle, struct dentry *dentry,
 		return -EINVAL;
 
 	retval = ext4_fname_setup_filename(dir, &dentry->d_name, 0, &fname);
+	if (retval)
+		return retval;
+
+	if (ext4_has_inline_data(dir)) {
+		retval = ext4_try_add_inline_entry(handle, &fname, dir, inode);
+		if (retval < 0)
+			goto out;
+		if (retval == 1) {
+			retval = 0;
+			goto out;
+		}
+	}
+
+	if (is_dx(dir)) {
+		retval = ext4_dx_add_entry(handle, &fname, dir, inode);
+		if (!retval || (retval != ERR_BAD_DX_DIR))
+			goto out;
+		ext4_clear_inode_flag(dir, EXT4_INODE_INDEX);
+		dx_fallback++;
+		ext4_mark_inode_dirty(handle, dir);
+	}
+	blocks = dir->i_size >> sb->s_blocksize_bits;
+	for (block = 0; block < blocks; block++) {
+		bh = ext4_read_dirblock(dir, block, DIRENT);
+		if (IS_ERR(bh)) {
+			retval = PTR_ERR(bh);
+			bh = NULL;
+			goto out;
+		}
+		retval = add_dirent_to_buf(handle, &fname, dir, inode,
+					   NULL, bh);
+		if (retval != -ENOSPC)
+			goto out;
+
+		if (blocks == 1 && !dx_fallback &&
+		    ext4_has_feature_dir_index(sb)) {
+			retval = make_indexed_dir(handle, &fname, dir,
+						  inode, bh);
+			bh = NULL; /* make_indexed_dir releases bh */
+			goto out;
+		}
+		brelse(bh);
+	}
+	bh = ext4_append(handle, dir, &block);
+	if (IS_ERR(bh)) {
+		retval = PTR_ERR(bh);
+		bh = NULL;
+		goto out;
+	}
+	de = (struct ext4_dir_entry_2 *) bh->b_data;
+	de->inode = 0;
+	de->rec_len = ext4_rec_len_to_disk(blocksize - csum_size, blocksize);
+
+	if (csum_size) {
+		t = EXT4_DIRENT_TAIL(bh->b_data, blocksize);
+		initialize_dirent_tail(t, blocksize);
+	}
+
+	retval = add_dirent_to_buf(handle, &fname, dir, inode, de, bh);
+out:
+	ext4_fname_free_filename(&fname);
+	brelse(bh);
+	if (retval == 0)
+		ext4_set_inode_state(inode, EXT4_STATE_NEWENTRY);
+	return retval;
+}
+
+/* Like ext4_add_entry, but takes only the inode of the parent directory, and
+ * and the directory entry name as a char* */
+int ext4_add_entry_under_inode(handle_t *handle, struct inode *dir,
+		char *name, struct inode *inode) {
+	struct qstr name_qs = QSTR_INIT(name, strlen(name));
+	struct buffer_head *bh = NULL;
+	struct ext4_dir_entry_2 *de;
+	struct ext4_dir_entry_tail *t;
+	struct super_block *sb;
+	struct ext4_filename fname;
+	int	retval;
+	int	dx_fallback=0;
+	unsigned blocksize;
+	ext4_lblk_t block, blocks;
+	int	csum_size = 0;
+
+	if (ext4_has_metadata_csum(inode->i_sb))
+		csum_size = sizeof(struct ext4_dir_entry_tail);
+
+	sb = dir->i_sb;
+	blocksize = sb->s_blocksize;
+	if (!name_qs.len)
+		return -EINVAL;
+
+	retval = ext4_fname_setup_filename(dir, &name_qs, 0, &fname);
 	if (retval)
 		return retval;
 
@@ -2338,7 +2430,7 @@ int ext4_generic_delete_entry(handle_t *handle,
 	return -ENOENT;
 }
 
-static int ext4_delete_entry(handle_t *handle,
+int ext4_delete_entry(handle_t *handle,
 			     struct inode *dir,
 			     struct ext4_dir_entry_2 *de_del,
 			     struct buffer_head *bh)
@@ -2390,7 +2482,7 @@ out:
  * for checking S_ISDIR(inode) (since the INODE_INDEX feature will not be set
  * on regular files) and to avoid creating huge/slow non-HTREE directories.
  */
-static void ext4_inc_count(handle_t *handle, struct inode *inode)
+void ext4_inc_count(handle_t *handle, struct inode *inode)
 {
 	inc_nlink(inode);
 	if (is_dx(inode) &&
