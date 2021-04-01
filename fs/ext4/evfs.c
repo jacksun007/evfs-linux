@@ -17,6 +17,40 @@
 #include "mballoc.h"
 #include "ext4_jbd2.h"
 #include "ext4.h"
+#include "ext4_extents.h"
+#include "extents_status.h"
+
+/*
+ * Checks whether the range of extent is marked allocated or not.
+ *
+ * Note that the code assume that fex.fe_group has already been locked
+ * and bitmap_bh has been given write access by the caller.
+ *
+ * Returns 1 if the range of extents are active, and 0 if they are not.
+ * Also uses evfs_query enum to indicate whether we should check for
+ * all extents in given range to be active, or at least one of them.
+ *
+ * If valid type is not provided, -EFAULT will be returned.
+ */
+static inline int ext4_extent_check(struct ext4_free_extent fex,
+		struct buffer_head *bitmap_bh, enum evfs_query type)
+{
+	int i = 0;
+	if (type == EVFS_ANY) {
+		for (i = 0; i < fex.fe_len; i++) {
+			if (mb_test_bit(fex.fe_start + i, bitmap_bh->b_data))
+				return 1;
+		}
+		return 0;
+	} else if (type == EVFS_ALL) {
+		for (i = 0; i < fex.fe_len; i++) {
+			if (!mb_test_bit(fex.fe_start + i, bitmap_bh->b_data))
+				return 0;
+		}
+		return 1;
+	}
+	return -EFAULT;
+}
 
 struct buffer_head *find_entry(struct inode *dir, const char *name,
 		struct ext4_dir_entry_2 **de) {
@@ -143,6 +177,8 @@ int dirent_add(struct file *filep, struct super_block *sb, unsigned long arg) {
 	if (handle)
 		ext4_journal_stop(handle);
 
+	iput(entry_inode);
+	iput(dir);
 	return 0;
 }
 
@@ -291,8 +327,6 @@ ext4_evfs_inode_alloc(struct file *filp, struct super_block *sb,
 		return PTR_ERR(new_inode);
 	}
 
-	ext4_msg(sb, KERN_ERR, "locked inode %ld", new_inode->i_ino);
-
 	new_inode->i_op = &ext4_file_inode_operations;
 	new_inode->i_fop = &ext4_file_operations;
 	ext4_set_aops(new_inode);
@@ -331,7 +365,108 @@ ext4_evfs_inode_map(struct file *filp, struct super_block *sb,
 {
 	struct evfs_imap evfs_i;
 	struct inode *inode;
-	struct ext4_map_blocks map;
+	struct ext4_ext_path *path = NULL;
+	struct extent_status es;
+	struct ext4_free_extent fex;
+	struct buffer_head *bitmap_bh = NULL;
+	ext4_group_t group;
+	ext4_grpblk_t off_block;
+	handle_t *handle = NULL;
+	int err = 0;
+
+	if (copy_from_user(&evfs_i, (struct evfs_imap __user *) arg,
+				sizeof(struct evfs_imap)))
+		return -EFAULT;
+
+	if (unlikely(evfs_i.log_blkoff >= EXT_MAX_BLOCKS)) {
+		ext4_error(sb, "Logical block number is too large");
+		return -EFSCORRUPTED;
+	}
+
+	inode = ext4_iget_normal(sb, evfs_i.ino_nr);
+	if (IS_ERR(inode)) {
+		ext4_msg(sb, KERN_ERR, "iget failed during evfs");
+		return PTR_ERR(inode);
+	} else if (!S_ISREG(inode->i_mode)) {
+		ext4_msg(sb, KERN_ERR, "evfs_inode_map: "
+				"can only map extents to regular file");
+		iput(inode);
+		return -EINVAL;
+	}
+
+	ext4_get_group_no_and_offset(sb, evfs_i.phy_blkoff, &group, &off_block);
+
+	fex.fe_group = group;
+	fex.fe_start = off_block;
+	fex.fe_len = evfs_i.length;
+
+	bitmap_bh = ext4_read_block_bitmap(sb, group);
+	if (IS_ERR(bitmap_bh)) {
+		err = PTR_ERR(bitmap_bh);
+		bitmap_bh = NULL;
+		goto out;
+	}
+
+	err = ext4_journal_get_write_access(handle, bitmap_bh);
+	if (err)
+		goto out;
+
+	ext4_lock_group(sb, fex.fe_group);
+	if (!ext4_extent_check(fex, bitmap_bh, EVFS_ALL)) {
+		ext4_error(sb, "Given disk area is not allocated");
+		ext4_unlock_group(sb, fex.fe_group);
+		err = -EINVAL;
+		goto out;
+	}
+
+	if (ext4_es_lookup_extent(inode, evfs_i.log_blkoff, &es)) {
+		ext4_error(sb, "Logical block address is already mapped");
+		err = -EBUSY;
+		goto out;
+	}
+
+	/* TODO: This should be removed later on when EVFS handles inode locking separately */
+	down_write(&EXT4_I(inode)->i_data_sem);
+
+	path = ext4_find_extent(inode, evfs_i.log_blkoff, NULL, 0);
+	if (IS_ERR(path)) {
+		err = PTR_ERR(path);
+		goto out_lock;
+	}
+
+	if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
+		struct ext4_extent ex;
+		ext4_ext_store_pblock(&ex, evfs_i.phy_blkoff);
+		ex.ee_len = evfs_i.length;
+		err = ext4_ext_insert_extent(handle, inode, &path, &ex, 0);
+	} else {
+		// TODO:
+		ext4_msg(sb, KERN_ERR, "Inode %ld is NOT extent based!"
+			"EVFS operations currently not supported", inode->i_ino);
+		err = -EINVAL;
+	}
+
+out_lock:
+	/* TODO: Similar to down_write, remove when inode lock is implemented */
+	up_write(&EXT4_I(inode)->i_data_sem);
+	ext4_unlock_group(sb, fex.fe_group);
+out:
+	brelse(bitmap_bh);
+	fsync_bdev(sb->s_bdev);
+	iput(inode);
+	return err;
+}
+
+/*
+ * TODO: Currently no error when invalid request is received. Need to
+ *       check and fix this.
+ */
+long
+ext4_evfs_inode_unmap(struct file *filp, struct super_block *sb,
+		unsigned long arg)
+{
+	struct evfs_imap evfs_i;
+	struct inode *inode;
 	int ret = 0;
 
 	if (copy_from_user(&evfs_i, (struct evfs_imap __user *) arg,
@@ -340,20 +475,31 @@ ext4_evfs_inode_map(struct file *filp, struct super_block *sb,
 
 	inode = ext4_iget_normal(sb, evfs_i.ino_nr);
 	if (IS_ERR(inode)) {
-		ext4_msg(sb, KERN_ERR, "iget failed during evfs");
+		ext4_error(sb, "iget failed during evfs");
 		return PTR_ERR(inode);
 	} else if (!S_ISREG(inode->i_mode)) {
-		ext4_msg(sb, KERN_ERR, "evfs_inode_map: "
-				 "can only map extents to regular file");
+		ext4_error(sb, "evfs_inode_map: "
+				   "can only map extents to regular file");
 		iput(inode);
 		return -EINVAL;
 	}
 
-	map.m_lblk = evfs_i.log_blkoff;
-	map.m_pblk = evfs_i.phy_blkoff;
-	map.m_len = evfs_i.length;
+	/* TODO: This should be removed later on when EVFS handles inode locking separately */
+	down_write(&EXT4_I(inode)->i_data_sem);
 
-	ret = ext4_map_blocks(NULL, inode, &map, EXT4_GET_BLOCKS_CREATE);
+	if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
+		/* FIXME: This will free the underlying blocks as well!
+		 *        The logic needs to be broken down. */
+		ret = ext4_ext_remove_space(inode, evfs_i.log_blkoff, evfs_i.log_blkoff + evfs_i.length);
+	} else {
+		// TODO:
+		ext4_msg(sb, KERN_ERR, "Inode %ld is NOT extent based!"
+			"EVFS operations currently not supported", inode->i_ino);
+		ret = -EINVAL;
+	}
+
+	/* TODO: Similar to down_write, remove when inode lock is implemented */
+	up_write(&EXT4_I(inode)->i_data_sem);
 
 	fsync_bdev(sb->s_bdev);
 	iput(inode);
@@ -367,13 +513,11 @@ ext4_evfs_extent_active(struct file *filp, struct super_block *sb,
 	struct evfs_extent_query op;
 	struct ext4_free_extent fex;
 	struct buffer_head *bitmap_bh = NULL;
-	struct ext4_group_desc *gdp;
-	struct buffer_head *gdp_bh;
 	ext4_group_t group;
 	ext4_grpblk_t off_block;
 	ext4_fsblk_t block;
 	handle_t *handle = NULL;
-	int err = 0, i = 0;
+	int err = 0;
 
 	if (copy_from_user(&op, (struct evfs_extent_query __user *) arg,
 				sizeof(struct evfs_extent_query)))
@@ -398,30 +542,10 @@ ext4_evfs_extent_active(struct file *filp, struct super_block *sb,
 	if (err)
 		goto out;
 
-	gdp = ext4_get_group_desc(sb, group, &gdp_bh);
-	if (!gdp)
-		goto out;
-
-	ext4_debug("using block group %u(%d)\n", group,
-			ext4_free_group_clusters(sb, gdp));
-
-	BUFFER_TRACE(gdp_bh, "get_write_access");
-	err = ext4_journal_get_write_access(handle, gdp_bh);
-	if (err)
-		goto out;
-
 	ext4_lock_group(sb, fex.fe_group);
-
-	for (i = 0; i < fex.fe_len; i++) {
-		if (!mb_test_bit(fex.fe_start + i, bitmap_bh->b_data)) {
-			err = 0;
-			goto unlock_out;
-		}
-	}
-	err = 1;
-
-unlock_out:
+	err = ext4_extent_check(fex, bitmap_bh, op.query);
 	ext4_unlock_group(sb, fex.fe_group);
+
 out:
 	brelse(bitmap_bh);
 	return err;
@@ -437,6 +561,7 @@ ext4_evfs_extent_free(struct file *filp, struct super_block *sb,
 	struct ext4_group_desc *gdp;
 	struct buffer_head *gdp_bh;
 	struct ext4_free_extent fex;
+	struct ext4_group_info *grp = NULL;
 	ext4_group_t group;
 	ext4_grpblk_t off_block;
 	ext4_fsblk_t block;
@@ -483,6 +608,8 @@ ext4_evfs_extent_free(struct file *filp, struct super_block *sb,
 	mb_clear_bits(bitmap_bh->b_data, fex.fe_start, fex.fe_len);
 
 	len = ext4_free_group_clusters(sb, gdp) + fex.fe_len;
+	grp = ext4_get_group_info(sb, group);
+	grp->bb_free += fex.fe_len;
 	ext4_free_group_clusters_set(sb, gdp, len);
 	ext4_block_bitmap_csum_set(sb, group, gdp, bitmap_bh);
 	ext4_group_desc_csum_set(sb, group, gdp);
@@ -508,6 +635,9 @@ out:
 	return err;
 }
 
+/*
+ * TODO: Currently does not allow the use of hints. This should be fixed
+ */
 long
 ext4_evfs_extent_alloc(struct file *filp, struct super_block *sb,
 		unsigned long arg)
@@ -519,6 +649,7 @@ ext4_evfs_extent_alloc(struct file *filp, struct super_block *sb,
 	struct ext4_group_desc *gdp;
 	struct buffer_head *gdp_bh;
 	struct ext4_free_extent fex;
+	struct ext4_group_info *grp = NULL;
 	ext4_group_t group;
 	ext4_grpblk_t off_block;
 	ext4_fsblk_t block;
@@ -565,6 +696,11 @@ ext4_evfs_extent_alloc(struct file *filp, struct super_block *sb,
 
 	block = ext4_grp_offs_to_block(sb, &fex);
 
+	/*
+	 * TODO: Code taken from ext4 source code. I am not entirely sure
+	 *       what this does at the moment and not even sure if this is
+	 *       necessary.
+	 */
 	len = EXT4_C2B(sbi, fex.fe_len);
 	if (!ext4_data_block_valid(sbi, block, len)) {
 		ext4_error(sb, "Allocating blocks %llu-%llu which overlap "
@@ -585,9 +721,18 @@ ext4_evfs_extent_alloc(struct file *filp, struct super_block *sb,
 
 	ext4_lock_group(sb, group);
 
+	if (ext4_extent_check(fex, bitmap_bh, EVFS_ALL)) {
+		ext4_error(sb, "Given range of extent is allocated already");
+		ext4_unlock_group(sb, group);
+		err = -ENOSPC;
+		goto out;
+	}
+
 	ext4_set_bits(bitmap_bh->b_data, fex.fe_start, fex.fe_len);
 
 	len = ext4_free_group_clusters(sb, gdp) - fex.fe_len;
+	grp = ext4_get_group_info(sb, group);
+	grp->bb_free -= fex.fe_len;
 	ext4_free_group_clusters_set(sb, gdp, len);
 	ext4_block_bitmap_csum_set(sb, fex.fe_group, gdp, bitmap_bh);
 	ext4_group_desc_csum_set(sb, fex.fe_group, gdp);
@@ -723,6 +868,8 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return ext4_evfs_inode_read(filp, sb, arg);
 	case FS_IOC_INODE_MAP:
 		return ext4_evfs_inode_map(filp, sb, arg);
+	case FS_IOC_INODE_UNMAP:
+		return ext4_evfs_inode_unmap(filp, sb, arg);
 	case FS_IOC_EXTENT_ACTIVE:
 		return ext4_evfs_extent_active(filp, sb, arg);
 	case FS_IOC_EXTENT_ALLOC:
