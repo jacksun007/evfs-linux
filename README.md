@@ -12,6 +12,27 @@ Clone the repository with the following command:
 The above will make sure you only clone our active branch. Otherwise it may
 take a very long time cloning the entire history of Linux.
 
+Next, run `make menuconfig` to set up the kernel build. You will need to 
+make F2FS "included" (it is modularized by default). You can do this by
+going under File Systems, select F2FS and press "Y". You should see the
+option go from `<M>` to `<*>`. It may be helpful to add a local release name. My personal choice is "-evfs". 
+
+Then, compile the kernel. You may want to use as many CPUs as you have available
+to expedite the build. e.g.,
+
+```
+make -j 4 && make -j 4 modules
+```
+
+Assuming the build was successful. Install the modules and the kernel.
+
+```
+sudo make modules_install
+sudo make install 
+```
+
+Reboot and run the kernel that you just built. Run `uname -r` to make sure you are now running the kernel with evfs support.
+
 ## Code Organization
 
 `include/uapi/linux/evfs.h` - where all common evfs structures and ioctl
