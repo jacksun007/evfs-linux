@@ -465,13 +465,19 @@ long
 ext4_evfs_inode_unmap(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
+	struct ext4_sb_info *sbi = EXT4_SB(sb);
 	struct evfs_imap evfs_i;
 	struct inode *inode;
-	int ret = 0;
+	long long partial_cluster = 0;
+	ext4_lblk_t start, end;
+	int err = 0;
 
 	if (copy_from_user(&evfs_i, (struct evfs_imap __user *) arg,
 				sizeof(struct evfs_imap)))
 		return -EFAULT;
+
+	start = evfs_i.log_blkoff;
+	end = start + evfs_i.length;
 
 	inode = ext4_iget_normal(sb, evfs_i.ino_nr);
 	if (IS_ERR(inode)) {
@@ -490,20 +496,19 @@ ext4_evfs_inode_unmap(struct file *filp, struct super_block *sb,
 	if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
 		/* FIXME: This will free the underlying blocks as well!
 		 *        The logic needs to be broken down. */
-		ret = ext4_ext_remove_space(inode, evfs_i.log_blkoff, evfs_i.log_blkoff + evfs_i.length);
+		err = ext4_ext_unmap_space(inode, evfs_i.log_blkoff, evfs_i.log_blkoff + evfs_i.length);
 	} else {
 		// TODO:
 		ext4_msg(sb, KERN_ERR, "Inode %ld is NOT extent based!"
 			"EVFS operations currently not supported", inode->i_ino);
-		ret = -EINVAL;
+		err = -EINVAL;
 	}
 
 	/* TODO: Similar to down_write, remove when inode lock is implemented */
 	up_write(&EXT4_I(inode)->i_data_sem);
-
 	fsync_bdev(sb->s_bdev);
 	iput(inode);
-	return ret;
+	return err;
 }
 
 long
