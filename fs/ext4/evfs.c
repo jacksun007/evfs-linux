@@ -494,8 +494,6 @@ ext4_evfs_inode_unmap(struct file *filp, struct super_block *sb,
 	down_write(&EXT4_I(inode)->i_data_sem);
 
 	if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
-		/* FIXME: This will free the underlying blocks as well!
-		 *        The logic needs to be broken down. */
 		err = ext4_ext_unmap_space(inode, evfs_i.log_blkoff, evfs_i.log_blkoff + evfs_i.length);
 	} else {
 		// TODO:

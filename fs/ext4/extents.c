@@ -2819,6 +2819,13 @@ ext4_ext_more_to_rm(struct ext4_ext_path *path)
 	return 1;
 }
 
+/*
+ * NOTE: This is a modified version of ext4_ext_rm_leaf,
+ *       which does not free the underlying blocks which
+ *       the target extent owns. Clearly, a lot of
+ *       redundant code is present, which can/should be
+ *       removed.
+ */
 static int
 ext4_ext_unmap_leaf(handle_t *handle, struct inode *inode,
 		 struct ext4_ext_path *path,
@@ -2983,6 +2990,10 @@ out:
 	return err;
 }
 
+/*
+ * NOTE: Similar to ext4_ext_unmap_leaf, this code is also
+ *       a slight alteration to existing ext4_ext_rm_space.
+ */
 int ext4_ext_unmap_space(struct inode *inode, ext4_lblk_t start,
 			ext4_lblk_t end)
 {
