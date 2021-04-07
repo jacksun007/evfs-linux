@@ -823,6 +823,23 @@ err_next_extent:
 }
 
 long
+ext4_evfs_sb_get(struct super_block *sb, unsigned long arg)
+{
+	struct evfs_super_block evfs_sb;
+
+	evfs_sb.max_extent = EXT_INIT_MAX_LEN;
+	evfs_sb.max_bytes = sb->s_maxbytes;
+	evfs_sb.page_size = PAGE_SIZE;
+	evfs_sb.root_ino = EXT4_ROOT_INO;
+
+	if (copy_to_user((struct evfs_super_block __user *) arg, &evfs_sb,
+				sizeof(struct evfs_super_block)))
+		return -EFAULT;
+	return 0;
+
+}
+
+long
 ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
@@ -881,6 +898,8 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return ext4_evfs_extent_free(filp, sb, arg);
 	case FS_IOC_EXTENT_ITERATE:
 		return ext4_evfs_extent_iter(filp, sb, arg);
+	case FS_IOC_SUPER_GET:
+		return ext4_evfs_sb_get(sb, arg);
 	}
 
 	return -ENOTTY;
