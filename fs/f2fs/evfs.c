@@ -1,3 +1,17 @@
+/* 
+ * fs/f2fs/evfs.c
+ *
+ * Implementation of the Evfs operations for F2FS.
+ *
+ * Copyright (c) 2021 University of Toronto
+ *                    Kyo-Keun Park
+ *                    Kuei (Jack) Sun
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
+
 #include <linux/fs.h>
 #include <linux/f2fs_fs.h>
 #include <linux/capability.h>
@@ -965,44 +979,39 @@ f2fs_evfs_sb_get(struct super_block *sb, unsigned long arg)
 	return 0;
 }
 
+static
+long
+f2fs_evfs_atomic_action(struct super_block * sb, struct evfs_atomic_action * aa)
+{
+    (void)sb;
+    (void)aa;
+    
+    // start locking
+    
+    // TODO: perform read/comp operations
+    
+    // perform write operation
+    
+    // unlock
+    return 0;
+}
+
 long
 f2fs_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
 	struct super_block *sb = inode->i_sb;
-	unsigned long ino_nr;
-	int err = 0;
+	struct evfs_atomic_action aa;
+	long err = 0;
 
 	switch(cmd) {
-	case FS_IOC_INODE_LOCK:
-		if (get_user(ino_nr, (unsigned long __user *) arg))
-			return -EFAULT;
-		inode = f2fs_iget(sb, ino_nr);
-		if (IS_ERR(inode)) {
-			f2fs_msg(sb, KERN_ERR, "iget failed during evfs");
-			return PTR_ERR(inode);
-		}
-
-		err = mnt_want_write_file(filp);
-		if (err)
-			return err;
-
-		inode_lock(inode);
-
-		return 0;
-	case FS_IOC_INODE_UNLOCK:
-		if (get_user(ino_nr, (unsigned long __user *) arg))
-			return -EFAULT;
-		inode = f2fs_iget(sb, ino_nr);
-		if (IS_ERR(inode)) {
-			f2fs_msg(sb, KERN_ERR, "iget failed during evfs");
-			return PTR_ERR(inode);
-		}
-
-		inode_unlock(inode);
-		mnt_drop_write_file(filp);
-
-		return 0;
+	case FS_IOC_EVFS_ACTION:    
+	    err = evfs_get_user_atomic_action(&aa, (void *) arg);
+	    if (err < 0)
+	        return err;
+	    err = f2fs_evfs_atomic_action(sb, &aa);
+	    evfs_destroy_atomic_action(&aa);
+	    return err;
 	case FS_IOC_EXTENT_ALLOC:
 		return f2fs_evfs_extent_alloc(filp, sb, arg);
 	case FS_IOC_EXTENT_ACTIVE:

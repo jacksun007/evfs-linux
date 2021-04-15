@@ -175,10 +175,92 @@ struct evfs_iter_ops {
 };
 
 /*
+ * Evfs operation naming conventions
+ *
+ * alloc  - allocate the object
+ * free   - free the object
+ * read   - read user data from the object (for extent and inode only)
+ * write  - write user data to the object
+ * info   - read metadata information from the object (replaces stat and get).
+ *        - reason: 'get' is easily confused with its association with 'put'.
+ * update - update metadata information for the object.
+ *
+ */
+enum evfs_opcode {
+    // read operations
+    EVFS_SUPER_INFO,
+    EVFS_INODE_INFO,
+    EVFS_DIRENT_INFO,
+    
+    EVFS_EXTENT_READ,   // read raw data from extent
+    EVFS_INODE_READ,    // same as posix read()
+    
+    // compare operations
+    // TODO: merge with Shawn's work
+    
+    // write operations
+    EVFS_EXTENT_ALLOC,
+    EVFS_INODE_ALLOC,
+    
+    EVFS_EXTENT_WRITE,  
+    EVFS_INODE_WRITE,
+    
+    // Note: the identifier for dirents is its filename + parent inode
+    EVFS_DIRENT_ADD,
+    EVFS_DIRENT_REMOVE,
+    EVFS_DIRENT_UPDATE,
+    EVFS_DIRENT_RENAME, // unlike update, this *keeps* content but changes id
+    
+    // inode-specific operations
+    EVFS_INODE_MAP,     // also "remaps"
+    EVFS_INODE_UNMAP,
+    EVFS_INODE_UPDATE,
+    
+    EVFS_SUPER_UPDATE,
+};
+
+struct evfs_read_op {
+    int opcode;
+    
+    union {
+        struct evfs_inode inode;    /* for inode_info */
+    };
+};
+
+struct evfs_comp_op {
+    int opcode;  
+};
+
+struct evfs_write_op {
+    int opcode;
+    
+    union {
+        struct evfs_inode inode;    /* for inode_update */
+    };
+};
+
+struct evfs_atomic_action {
+    int nr_read;
+    int nr_comp;
+    
+    /* set to null if absent (e.g. read-only atomic action would not have
+       a write_op so write_op == NULL) */
+    struct evfs_read_op * read_set;
+    struct evfs_comp_op * comp_set;
+    struct evfs_write_op * write_op;    /* ONLY ONE ALLOWED */
+    
+    int err;        /* error number */
+    int errop;      /* error operation (index number) */
+};
+
+/*
  * evfs ioctl commands
  *
  * double check that these command numbers don't overlap existing in
  * <uapi/linux/fs.h> before adding
+ *
+ * TODO (jsun): clean-up everything. only EVFS_ACTION should be kept.
+ * 
  */
 #define FS_IOC_INODE_LOCK _IOR('f', 64, long)
 #define FS_IOC_INODE_UNLOCK _IOR('f', 65, long)
@@ -200,6 +282,11 @@ struct evfs_iter_ops {
 #define FS_IOC_FREESP_ITERATE _IOR('f', 81, struct evfs_iter_ops)
 #define FS_IOC_INODE_ITERATE _IOR('f', 82, struct evfs_iter_ops)
 #define FS_IOC_SUPER_GET _IOR('f', 83, struct evfs_super_block)
+#define FS_IOC_EVFS_ACTION _IOWR('f', 96, struct evfs_atomic_action)
+
+// fs/evfs.c
+void evfs_destroy_atomic_action(struct evfs_atomic_action * aa);
+long evfs_get_user_atomic_action(struct evfs_atomic_action * aout, void * arg);
 
 #endif /* _UAPI_LINUX_EVFS_H */
 
