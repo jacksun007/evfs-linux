@@ -40,6 +40,7 @@
 #include <linux/uaccess.h>
 #include <linux/fiemap.h>
 #include <linux/backing-dev.h>
+#include "ext4.h"
 #include "ext4_jbd2.h"
 #include "ext4_extents.h"
 #include "xattr.h"
@@ -4662,7 +4663,6 @@ static int get_implied_cluster_alloc(struct super_block *sb,
 	return 0;
 }
 
-
 /*
  * Block allocation/map/preallocation routine for extents based files
  *
@@ -4708,6 +4708,15 @@ int ext4_ext_map_blocks(handle_t *handle, struct inode *inode,
 	}
 
 	depth = ext_depth(inode);
+
+	if (flags & EXT4_GET_BLOCKS_EVFS_MAP) {
+		offset = EXT4_LBLK_COFF(sbi, map->m_lblk);
+		ar.len = map->m_len;
+		newex.ee_block = cpu_to_le32(map->m_lblk);
+		newex.ee_len = cpu_to_le16(map->m_len);
+		newblock = map->m_pblk;
+		goto got_allocated_blocks;
+	}
 
 	/*
 	 * consistent leaf must not be empty;

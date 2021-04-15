@@ -365,13 +365,13 @@ ext4_evfs_inode_map(struct file *filp, struct super_block *sb,
 {
 	struct evfs_imap evfs_i;
 	struct inode *inode;
-	struct ext4_ext_path *path = NULL;
 	struct extent_status es;
 	struct ext4_free_extent fex;
 	struct buffer_head *bitmap_bh = NULL;
+	struct ext4_map_blocks map;
+	handle_t *handle = NULL;
 	ext4_group_t group;
 	ext4_grpblk_t off_block;
-	handle_t *handle = NULL;
 	int err = 0;
 
 	if (copy_from_user(&evfs_i, (struct evfs_imap __user *) arg,
@@ -428,17 +428,13 @@ ext4_evfs_inode_map(struct file *filp, struct super_block *sb,
 	/* TODO: This should be removed later on when EVFS handles inode locking separately */
 	down_write(&EXT4_I(inode)->i_data_sem);
 
-	path = ext4_find_extent(inode, evfs_i.log_blkoff, NULL, 0);
-	if (IS_ERR(path)) {
-		err = PTR_ERR(path);
-		goto out_lock;
-	}
+	map.m_flags = EXT4_GET_BLOCKS_CREATE;
+	map.m_lblk = evfs_i.log_blkoff;
+	map.m_pblk = evfs_i.phy_blkoff;
+	map.m_len = evfs_i.length;
 
 	if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
-		struct ext4_extent ex;
-		ext4_ext_store_pblock(&ex, evfs_i.phy_blkoff);
-		ex.ee_len = evfs_i.length;
-		err = ext4_ext_insert_extent(handle, inode, &path, &ex, 0);
+		err = ext4_ext_map_blocks(handle, inode, &map, EXT4_GET_BLOCKS_EVFS_MAP);
 	} else {
 		// TODO:
 		ext4_msg(sb, KERN_ERR, "Inode %ld is NOT extent based!"
@@ -446,7 +442,6 @@ ext4_evfs_inode_map(struct file *filp, struct super_block *sb,
 		err = -EINVAL;
 	}
 
-out_lock:
 	/* TODO: Similar to down_write, remove when inode lock is implemented */
 	up_write(&EXT4_I(inode)->i_data_sem);
 	ext4_unlock_group(sb, fex.fe_group);

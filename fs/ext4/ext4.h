@@ -597,6 +597,9 @@ enum {
 	 * allows jbd2 to avoid submitting data before commit. */
 #define EXT4_GET_BLOCKS_IO_SUBMIT		0x0400
 
+/* NOTE (kyokeun): Flag passed in from evfs_inode_map */
+#define EXT4_GET_BLOCKS_EVFS_MAP        0x0800
+
 /*
  * The bit position of these flags must not overlap with any of the
  * EXT4_GET_BLOCKS_*.  They are used by ext4_find_extent(),
