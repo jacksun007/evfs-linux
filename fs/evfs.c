@@ -332,3 +332,60 @@ evfs_copy_param(struct evfs_iter_ops *iter, const void *param, int size)
 		return 1;
 	return 0;
 }
+
+static
+long
+evfs_get_user_write_op(struct evfs_write_op ** woptr, void * arg)
+{
+    const size_t MSIZE = sizeof(struct evfs_write_op);
+    struct evfs_write_op * wop = kmalloc(MSIZE, GFP_KERNEL | GFP_NOFS);
+    long err;
+    
+    if (copy_from_user(wop, (struct evfs_write_op __user *) arg,
+				sizeof(struct evfs_write_op))) {
+		err = -EFAULT;
+	    goto fail;
+	}
+
+    *woptr = wop;
+    return 0;
+    
+fail:
+    kfree(wop);
+    *woptr = NULL;
+    return err;
+}
+
+void 
+evfs_destroy_atomic_action(struct evfs_atomic_action * aa)
+{
+    // TODO: this may need to be updated if write_op contains dynamically
+    //       allocated memory
+    if (aa->write_op)
+        kfree(aa->write_op);
+}
+
+
+long
+evfs_get_user_atomic_action(struct evfs_atomic_action * aout, void * arg)
+{
+    long err;
+    
+    if (copy_from_user(aout, (struct evfs_atomic_action __user *) arg,
+				sizeof(struct evfs_atomic_action)))
+	    return -EFAULT;
+
+	// TODO: support read and comp operations later
+	aout->read_set = NULL;
+	aout->comp_set = NULL;
+
+	err = evfs_get_user_write_op(&aout->write_op, aout->write_op);
+	if (err)
+	    return err;
+	
+	aout->err = 0;
+    aout->errop = 0;
+    
+    return 0;
+}
+
