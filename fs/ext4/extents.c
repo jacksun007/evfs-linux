@@ -3231,8 +3231,8 @@ out:
 	return err;
 }
 
-int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t start,
-			  ext4_lblk_t end)
+int __ext4_ext_remove_space(struct inode *inode, ext4_lblk_t start,
+			  ext4_lblk_t end, int flags)
 {
 	struct ext4_sb_info *sbi = EXT4_SB(inode->i_sb);
 	int depth = ext_depth(inode);
@@ -3479,6 +3479,12 @@ out:
 	ext4_journal_stop(handle);
 
 	return err;
+}
+
+int ext4_ext_remove_space(struct inode *inode, ext4_lblk_t start,
+				ext4_lblk_t end)
+{
+	return __ext4_ext_remove_space(inode, start, end, 0);
 }
 
 /*
@@ -4709,6 +4715,10 @@ int ext4_ext_map_blocks(handle_t *handle, struct inode *inode,
 
 	depth = ext_depth(inode);
 
+	/*
+	 * With EVFS inode map call, we assume that the user has already
+	 * allocated the blocks, hence we skip this part of the code.
+	 */
 	if (flags & EXT4_GET_BLOCKS_EVFS_MAP) {
 		offset = EXT4_LBLK_COFF(sbi, map->m_lblk);
 		ar.len = map->m_len;
