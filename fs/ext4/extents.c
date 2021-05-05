@@ -2959,7 +2959,7 @@ again:
 			/* this is leaf block */
 			err = ext4_ext_rm_leaf(handle, inode, path,
 					       &partial_cluster, start,
-					       end, EXT4_RM_BLOCKS_EVFS_UNMAP);
+					       end, flags);
 			/* root level has p_bh == NULL, brelse() eats this */
 			brelse(path[i].p_bh);
 			path[i].p_bh = NULL;

@@ -1742,7 +1742,7 @@ int ext4_mb_try_best_found(struct ext4_allocation_context *ac,
 	return 0;
 }
 
-static noinline_for_stack
+noinline_for_stack
 int ext4_mb_find_by_goal(struct ext4_allocation_context *ac,
 				struct ext4_buddy *e4b)
 {
@@ -2862,7 +2862,7 @@ void ext4_exit_mballoc(void)
  * Check quota and mark chosen space (ac->ac_b_ex) non-free in bitmaps
  * Returns 0 if success or error code
  */
-static noinline_for_stack int
+noinline_for_stack int
 ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac,
 				handle_t *handle, unsigned int reserv_clstrs)
 {
@@ -3223,7 +3223,7 @@ static void ext4_mb_collect_stats(struct ext4_allocation_context *ac)
  * pa_free in ext4_mb_release_context(), but on failure, we've already
  * zeroed out ac->ac_b_ex.fe_len, so group_pa->pa_free is not changed.
  */
-static void ext4_discard_allocated_blocks(struct ext4_allocation_context *ac)
+void ext4_discard_allocated_blocks(struct ext4_allocation_context *ac)
 {
 	struct ext4_prealloc_space *pa = ac->ac_pa;
 	struct ext4_buddy e4b;

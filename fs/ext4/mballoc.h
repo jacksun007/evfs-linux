@@ -216,6 +216,10 @@ ext4_mballoc_query_range(
 
 #endif
 
+/*
+ * Functions from mballoc.c which is being used by EVFS functions.
+ */
+
 static inline void *mb_correct_addr_and_bit(int *bit, void *addr)
 {
 #if BITS_PER_LONG == 64
@@ -301,3 +305,11 @@ static void mb_clear_bits(void *bm, int cur, int len)
 		cur++;
 	}
 }
+
+extern noinline_for_stack
+int ext4_mb_find_by_goal(struct ext4_allocation_context *ac,
+				struct ext4_buddy *e4b);
+extern noinline_for_stack int
+ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac,
+				handle_t *handle, unsigned int reserv_clstrs);
+extern void ext4_discard_allocated_blocks(struct ext4_allocation_context *ac);

@@ -16,12 +16,11 @@ int evfs_ealloc(int fd, int argc, char **argv)
 	int ret = 0;
 
 	if (argc != 3) {
-		fprintf(stderr, "usage: evfs_runner ealloc <ino_nr> <blkaddr> <length>\n");
+		fprintf(stderr, "usage: evfs_runner ealloc <flag> <blkaddr> <length>\n");
 		return 1;
 	}
 
-	ext_op.ino_nr = strtoll(argv[0], NULL, 10);
-	ext_op.flags = EVFS_EXTENT_ALLOC_FIXED;
+	ext_op.flags = strtoll(argv[0], NULL, 10);
 	ext.start = strtoll(argv[1], NULL, 10);
 	ext.length = strtoll(argv[2], NULL, 10);
 	ext_op.extent = ext;
@@ -31,8 +30,11 @@ int evfs_ealloc(int fd, int argc, char **argv)
 		perror("extent alloc");
 		return 1;
 	} else if (ret != ext.start) {
-		printf("Hint failed. Created extent starting %d with "
-				"length of %d\n", ext.start, ext.length);
+		if (ext_op.flags & EVFS_EXTENT_ALLOC_FIXED)
+			printf("Hint failed. No actions taken.\n");
+		else
+			printf("Hint failed. Created extent starting %d with "
+					"length of %d\n", ext.start, ext.length);
 	} else {
 		printf("Hint successful. Created extent starting %d with "
 				"length of %d\n", ext.start, ext.length);

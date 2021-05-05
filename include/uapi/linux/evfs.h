@@ -254,6 +254,11 @@ struct evfs_atomic_action {
 };
 
 /*
+ * NOTE: EXPERIMENTAL
+ */
+#define FS_IOC_INODE_PREALLOC _IOR('f', 123, long)
+
+/*
  * evfs ioctl commands
  *
  * double check that these command numbers don't overlap existing in
