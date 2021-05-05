@@ -849,27 +849,23 @@ f2fs_evfs_inode_get(struct file *filp, struct super_block *sb, unsigned long arg
 	return 0;
 }
 
+static
 long
-f2fs_evfs_inode_set(struct file *filp, struct super_block *sb, unsigned long arg)
+f2fs_evfs_inode_update(struct super_block *sb, struct evfs_inode * evfs_inode)
 {
 	struct f2fs_sb_info *sbi = F2FS_SB(sb);
-	struct evfs_inode evfs_i;
 	struct inode *inode;
 	struct page *page;
 
-	if (copy_from_user(&evfs_i, (struct evfs_inode __user *) arg,
-				sizeof(struct evfs_inode)))
-		return -EFAULT;
-
-	inode = f2fs_iget(sb, evfs_i.ino_nr);
+	inode = f2fs_iget(sb, evfs_inode->ino_nr);
 	if (IS_ERR(inode)) {
 		f2fs_msg(sb, KERN_ERR, "iget failed during evfs");
 		return PTR_ERR(inode);
 	}
 
-	evfs_to_vfs_inode(&evfs_i, inode);
+	evfs_to_vfs_inode(evfs_inode, inode);
 
-	page = get_node_page(sbi, evfs_i.ino_nr);
+	page = get_node_page(sbi, evfs_inode->ino_nr);
 	if (IS_ERR(page)) {
 		f2fs_msg(sb, KERN_ERR, "get_node_page failed during evfs");
 		iput(inode);
@@ -883,6 +879,18 @@ f2fs_evfs_inode_set(struct file *filp, struct super_block *sb, unsigned long arg
 	iput(inode);
 
 	return 0;
+}
+
+long
+f2fs_evfs_inode_set(struct file *filp, struct super_block *sb, unsigned long arg)
+{
+	struct evfs_inode evfs_i;
+
+	if (copy_from_user(&evfs_i, (struct evfs_inode __user *) arg,
+				sizeof(struct evfs_inode)))
+		return -EFAULT;
+
+	return f2fs_evfs_inode_update(sb, &evfs_i);
 }
 
 long
@@ -981,19 +989,143 @@ f2fs_evfs_sb_get(struct super_block *sb, unsigned long arg)
 
 static
 long
+f2fs_evfs_inode_lock(struct super_block * sb, struct evfs_lockable * lkb)
+{
+    struct inode * inode = f2fs_iget(sb, lkb->object_id);
+	if (IS_ERR(inode)) {
+		return -ENOENT;
+	}
+	
+	if (lkb->exclusive) {
+	    inode_lock(inode);
+	}
+	else {
+	    inode_lock_shared(inode);
+	}
+	
+	iput(inode);
+	return 0;
+}
+
+static
+void
+f2fs_evfs_inode_unlock(struct super_block * sb, struct evfs_lockable * lkb)
+{
+    struct inode * inode = f2fs_iget(sb, lkb->object_id);
+	if (IS_ERR(inode)) {
+	    panic("trying to unlock inode %lu but it does not exist!\n", 
+	        lkb->object_id);
+	    return;
+	}
+
+    if (lkb->exclusive) {
+        inode_unlock(inode);
+    }
+    else {
+        inode_unlock_shared(inode);
+    }
+
+    iput(inode);
+}
+
+static long f2fs_evfs_lock_all(struct super_block * sb, 
+                               struct evfs_lockable * lockables,
+                               int nr_lockable)
+{
+    long err = 0;
+    int i;
+
+    for (i = 0; i < nr_lockable; i++) {
+        switch (lockables[i].type) {
+        case EVFS_TYPE_INODE:
+            err = f2fs_evfs_inode_lock(sb, &lockables[i]);
+            break;
+        default:
+            panic("not implemented. should not get here\n");
+        }
+        
+        if (err < 0) {
+            break;
+        }
+    }
+    
+    return err;
+}
+
+static void f2fs_evfs_unlock_all(struct super_block * sb, 
+                                 struct evfs_lockable * lockables,
+                                 int nr_lockable)
+{
+    int i;
+
+    for (i = 0; i < nr_lockable; i++) {
+        switch (lockables[i].type) {
+        case EVFS_TYPE_INODE:
+            f2fs_evfs_inode_unlock(sb, &lockables[i]);
+            break;
+        default:
+            panic("not implemented. should not get here\n");
+        }
+    }
+}
+
+static
+long
 f2fs_evfs_atomic_action(struct super_block * sb, struct evfs_atomic_action * aa)
 {
-    (void)sb;
-    (void)aa;
+    long err = 0;
+
+    // TODO: move into a generic evfs function
+    int max_lockable = aa->nr_read + 1;
+    int nr_lockable = 0;
+    int lsize = max_lockable * sizeof(struct evfs_lockable);
+    struct evfs_lockable * lockables = kmalloc(lsize, GFP_KERNEL | GFP_NOFS);
     
-    // start locking
+    if (!lockables) {
+        return -ENOMEM;
+    }
+
+    if (aa->write_op) {
+        switch (aa->write_op->opcode) {
+        case EVFS_INODE_MAP:
+        case EVFS_INODE_UPDATE:
+            lockables[0].type = EVFS_TYPE_INODE;
+            lockables[0].object_id = aa->write_op->inode.ino_nr;
+            lockables[0].exclusive = 1;
+            break;
+        default:
+            err = -EINVAL;
+            goto fail;
+        }
+        
+        nr_lockable++;
+    }
+    
+    err = f2fs_evfs_lock_all(sb, lockables, nr_lockable);
+    if (err < 0)
+        goto fail;
     
     // TODO: perform read/comp operations
     
     // perform write operation
+    if (aa->write_op) {
+        switch (aa->write_op->opcode) {
+        case EVFS_INODE_MAP:
+        case EVFS_INODE_UPDATE:
+            err = f2fs_evfs_inode_update(sb, &aa->write_op->inode);
+            break;
+        default:
+            panic("this shouldn't be possible...");
+        }
+    }
     
     // unlock
-    return 0;
+    f2fs_evfs_unlock_all(sb, lockables, nr_lockable);
+
+fail:
+    kfree(lockables);
+    (void)sb;
+    return err;
 }
 
 long

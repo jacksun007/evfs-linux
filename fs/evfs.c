@@ -338,8 +338,17 @@ long
 evfs_get_user_write_op(struct evfs_write_op ** woptr, void * arg)
 {
     const size_t MSIZE = sizeof(struct evfs_write_op);
-    struct evfs_write_op * wop = kmalloc(MSIZE, GFP_KERNEL | GFP_NOFS);
+    struct evfs_write_op * wop = NULL;
     long err;
+    
+    if (arg == NULL)
+        goto done;
+    
+    wop = kmalloc(MSIZE, GFP_KERNEL | GFP_NOFS);
+    if (wop == NULL) {
+        err = -ENOMEM;
+        goto fail;
+    }
     
     if (copy_from_user(wop, (struct evfs_write_op __user *) arg,
 				sizeof(struct evfs_write_op))) {
@@ -347,6 +356,7 @@ evfs_get_user_write_op(struct evfs_write_op ** woptr, void * arg)
 	    goto fail;
 	}
 
+done:
     *woptr = wop;
     return 0;
     
