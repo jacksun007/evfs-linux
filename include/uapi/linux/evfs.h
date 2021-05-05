@@ -5,6 +5,14 @@
 #include <linux/ioctl.h>
 #include <linux/types.h>
 
+enum evfs_type {
+    EVFS_TYPE_INODE,
+    EVFS_TYPE_EXTENT,
+    EVFS_TYPE_SUPER,
+    EVFS_TYPE_DIRENT,
+    EVFS_TYPE_METADATA,
+};
+
 typedef unsigned int u32;
 
 /*
@@ -237,6 +245,13 @@ struct evfs_write_op {
     union {
         struct evfs_inode inode;    /* for inode_update */
     };
+};
+
+// note that for dirent operations, the parent directory is locked
+struct evfs_lockable {
+    unsigned type;
+    unsigned long object_id;
+    int exclusive;  // read or write lock?
 };
 
 struct evfs_atomic_action {
