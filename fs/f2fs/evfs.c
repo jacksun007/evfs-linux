@@ -577,7 +577,6 @@ f2fs_evfs_inode_unmap(struct file *filp, struct super_block *sb, unsigned long a
 	struct evfs_imap evfs_i;
 	struct inode *inode;
 	block_t blk_addr, start, len;
-	int ret;
 
 	if (copy_from_user(&evfs_i, (struct evfs_imap __user *) arg,
 				sizeof(struct evfs_imap)))

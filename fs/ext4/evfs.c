@@ -379,6 +379,10 @@ ext4_evfs_inode_map(struct file *filp, struct super_block *sb,
 				sizeof(struct evfs_imap)))
 		return -EFAULT;
 
+	if (unlikely(evfs_i.length > INT_MAX)) {
+		ext4_error(sb, "Extent size too large");
+		return -EFSCORRUPTED;
+	}
 	if (unlikely(evfs_i.log_blkoff >= EXT_MAX_BLOCKS)) {
 		ext4_error(sb, "Logical block number is too large");
 		return -EFSCORRUPTED;
@@ -461,10 +465,8 @@ long
 ext4_evfs_inode_unmap(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
-	struct ext4_sb_info *sbi = EXT4_SB(sb);
 	struct evfs_imap evfs_i;
 	struct inode *inode;
-	long long partial_cluster = 0;
 	ext4_lblk_t start, end;
 	int err = 0;
 
@@ -515,13 +517,13 @@ ext4_evfs_inode_iter(struct file *filp, struct super_block *sb,
 	struct inode *inode;
 	struct ext4_group_desc *gdp;
 	struct buffer_head *bh;
-	ext4_group_t block_group;
+	ext4_group_t group, max_group = sbi->s_groups_count;
 	unsigned long ino_offset;
-	ext4_fsblk_t block;
 	int inodes_per_block = sbi->s_inodes_per_block;
 	int ino_nr = sbi->s_first_ino;
-	int max_ino_nr = le32_to_cpu(sbi->s_es->s_inodes_count);
 	int ret = 0;
+
+	iter.count = 0;
 
 	if (copy_from_user(&iter, (struct evfs_iter_ops __user *) arg,
 				sizeof(struct evfs_iter_ops)))
@@ -530,45 +532,73 @@ ext4_evfs_inode_iter(struct file *filp, struct super_block *sb,
 	if (iter.ino_nr > ino_nr)
 		ino_nr = iter.ino_nr;
 
-	for (; ino_nr < max_ino_nr; ino_nr++) {
-		int i;
-		ino_offset = (ino_nr - 1) % EXT4_INODES_PER_GROUP(sb);
-		block_group = (ino_nr - 1) / EXT4_INODES_PER_GROUP(sb);
-		gdp = ext4_get_group_desc(sb, block_group, NULL);
-		if (!gdp)
-			continue;
-		block = ext4_inode_table(sb, gdp) + (ino_offset / inodes_per_block);
-		i = ino_offset & ~(inodes_per_block - 1);
+	ino_offset = (ino_nr - 1) % EXT4_INODES_PER_GROUP(sb);
+	group = (ino_nr - 1) / EXT4_INODES_PER_GROUP(sb);
 
-		bh = sb_getblk(sb, ext4_inode_bitmap(sb, gdp));
-		if (unlikely(!bh)) {
-			ext4_msg(sb, KERN_ERR, "bitmap not allocated and may require IO!");
+	for (; group < max_group; group++) {
+		gdp = ext4_get_group_desc(sb, group, NULL);
+		if (!gdp) {
+			ext4_msg(sb, KERN_ERR, "group %d invalid", group);
 			continue;
 		}
-		if (!ext4_test_bit(i, bh->b_data)) {
-			brelse(bh);
-			continue;
+		bh = sb_getblk(sb, ext4_inode_bitmap(sb, gdp));
+		/*
+		 * TODO (kyokeun): There's some edge cases that I am not taking
+		 *                 in consideration of (i.e., concurrency could
+		 *                 be a problem since we don't hold onto the bitmap)
+		 *                 It seems to work fine for basic cases.
+		 *
+		 *                 Another problem is that when running
+		 *                 inoiter multiple times, csum_verify
+		 *                 function passes. This is a problem
+		 *                 since we shouldn't be trying to read
+		 *                 a bitmap that has not been initialized.
+		 */
+		if (!buffer_uptodate(bh)) {
+			ext4_msg(sb, KERN_ERR, "group %d buffer not up to date!", group);
+			lock_buffer(bh);
+			get_bh(bh);
+			bh->b_end_io = end_buffer_read_sync;
+			submit_bh(REQ_OP_READ, REQ_META | REQ_PRIO, bh);
+			wait_on_buffer(bh);
+			if (!buffer_uptodate(bh)) {
+				ext4_msg(sb, KERN_ERR, "group %d buffer can't fetch!", group);
+				unlock_buffer(bh);
+				brelse(bh);
+				continue;
+			}
+			if (!ext4_inode_bitmap_csum_verify(sb, group, gdp, bh, EXT4_INODES_PER_GROUP(sb) / 8)) {
+				ext4_msg(sb, KERN_ERR, "group %d bitmap failed to verify!", group);
+				unlock_buffer(bh);
+				brelse(bh);
+				continue;
+			}
+			set_buffer_uptodate(bh);
+			unlock_buffer(bh);
+		}
+		for (; ino_offset < EXT4_INODES_PER_GROUP(sb); ino_offset++) {
+			if (mb_test_bit(ino_offset, bh->b_data)) {
+				ino_nr = (group * EXT4_INODES_PER_GROUP(sb)) + ino_offset + 1;
+				inode = ext4_iget(sb, ino_nr);
+				if (!inode || IS_ERR(inode) || inode->i_state & I_CLEAR)
+					continue;
+				if (!S_ISREG(inode->i_mode)) {
+					iput(inode);
+					continue;
+				}
+				param.ino_nr = ino_nr;
+				vfs_to_evfs_inode(inode, &param.i);
+				iput(inode);
+				if (evfs_copy_param(&iter, &param,
+						sizeof(struct __evfs_ino_iter_param))) {
+					brelse(bh);
+					ret = 1;
+					goto out;
+				}
+			}
 		}
 		brelse(bh);
-
-		inode = ext4_iget(sb, ino_nr);
-		if (IS_ERR(inode))
-			continue;
-
-		if (!S_ISREG(inode->i_mode) || !inode->i_nlink) {
-			iput(inode);
-			continue;
-		}
-
-		param.ino_nr = ino_nr;
-		vfs_to_evfs_inode(inode, &param.i);
-		iput(inode);
-
-		if (evfs_copy_param(&iter, &param,
-				sizeof(struct __evfs_ino_iter_param))) {
-			ret = 1;
-			goto out;
-		}
+		ino_offset = 0;
 	}
 
 out:
@@ -652,6 +682,14 @@ ext4_evfs_extent_free(struct file *filp, struct super_block *sb,
 	fex.fe_group = group;
 	fex.fe_len = op.length;
 
+	/*
+	 * NOTE (kyokeun): This uses the older method of reading the disk bitmap
+	 *                 to determine whether it has been allocated. This
+	 *                 bypasses some of the implications made by the
+	 *                 buddy cache and preallocation system which
+	 *                 Ext4 uses. Like extent allocate, this should use
+	 *                 buddy bitmap instead.
+	 */
 	bitmap_bh = ext4_read_block_bitmap(sb, group);
 	if (IS_ERR(bitmap_bh)) {
 		err = PTR_ERR(bitmap_bh);
@@ -707,9 +745,6 @@ out:
 	return err;
 }
 
-/*
- * TODO: Currently does not allow the use of hints. This should be fixed
- */
 long
 ext4_evfs_extent_alloc(struct file *filp, struct super_block *sb,
 		unsigned long arg)
@@ -719,7 +754,7 @@ ext4_evfs_extent_alloc(struct file *filp, struct super_block *sb,
 	struct ext4_allocation_context ac;
 	struct ext4_buddy e4b;
 	handle_t *handle = NULL;
-	ext4_group_t group, ngroups = ext4_get_groups_count(sb);
+	ext4_group_t group, max_groups = ext4_get_groups_count(sb);
 	ext4_grpblk_t off_block;
 	int err = 0;
 
@@ -730,7 +765,7 @@ ext4_evfs_extent_alloc(struct file *filp, struct super_block *sb,
 
 	ext4_get_group_no_and_offset(sb, op.start, &group, &off_block);
 
-	if (ngroups < group) {
+	if (max_groups < group) {
 		ext4_error(sb, "Given physical address (%lu) out of range", op.start);
 		return -EINVAL;
 	}
@@ -826,6 +861,126 @@ err_next_extent:
 }
 
 long
+ext4_evfs_freesp_iter(struct file *filp, struct super_block *sb,
+		unsigned long arg)
+{
+	struct evfs_iter_ops iter;
+	struct __evfs_fsp_iter_param param = { 0 };
+	struct ext4_sb_info *sbi = EXT4_SB(sb);
+	struct ext4_group_desc *gdp;
+	struct buffer_head *bh;
+	ext4_group_t group, max_groups = ext4_get_groups_count(sb);
+	ext4_grpblk_t off_block;
+	ext4_fsblk_t start_addr = 0;
+	int err = 0, start_marked = 0, len = 0;
+
+	if (copy_from_user(&iter, (struct evfs_iter_ops __user *) arg,
+				sizeof(struct evfs_iter_ops)))
+		return -EFAULT;
+	iter.count = 0;
+	ext4_get_group_no_and_offset(sb, iter.start_from, &group, &off_block);
+	if (max_groups < group) {
+		ext4_error(sb, "Givern physical addres (%lu) out of range",
+				iter.start_from);
+		return -EINVAL;
+	}
+
+	ext4_msg(sb, KERN_ERR, "max block %lu", EXT4_BLOCKS_PER_GROUP(sb));
+
+	for (; group < max_groups; group++) {
+		gdp = ext4_get_group_desc(sb, group, NULL);
+		if (!gdp) {
+			ext4_msg(sb, KERN_ERR, "group %d invalid", group);
+			continue;
+		}
+		bh = sb_getblk(sb, ext4_block_bitmap(sb, gdp));
+		/*
+		 * TODO (kyokeun): Currently does not consider uninitialized groups.
+		 *
+		 *                 Furthermore, current code does not check for
+		 *                 maximum supported extent size, so the length
+		 *                 of the provided extent from EVFS interface
+		 *                 might be larger than max supported by EXT4.
+		 */
+		lock_buffer(bh);
+		if (!buffer_uptodate(bh)) {
+			ext4_msg(sb, KERN_ERR, "group %d buffer not up to date!", group);
+			get_bh(bh);
+			bh->b_end_io = end_buffer_read_sync;
+			submit_bh(REQ_OP_READ, REQ_META | REQ_PRIO, bh);
+			wait_on_buffer(bh);
+			if (!buffer_uptodate(bh)) {
+				ext4_msg(sb, KERN_ERR, "group %d buffer can't fetch!", group);
+				unlock_buffer(bh);
+				brelse(bh);
+				continue;
+			}
+			if (!ext4_block_bitmap_csum_verify(sb, group, gdp, bh)) {
+				ext4_msg(sb, KERN_ERR, "group %d bitmap, failed to verify!", group);
+				unlock_buffer(bh);
+				brelse(bh);
+				continue;
+			}
+			set_buffer_uptodate(bh);
+		}
+		for (; off_block < EXT4_BLOCKS_PER_GROUP(sb); off_block++) {
+			int is_set = mb_test_bit(off_block, bh->b_data);
+			if (!is_set && !start_marked) {
+				start_marked = 1;
+				param.addr = (group * EXT4_BLOCKS_PER_GROUP(sb)) + off_block;
+				param.length = 1;
+			} else if (is_set && start_marked) {
+				start_marked = 0;
+				if (evfs_copy_param(&iter, &param,
+							sizeof(struct __evfs_fsp_iter_param))) {
+					unlock_buffer(bh);
+					brelse(bh);
+					err = 1;
+					goto out;
+				}
+			} else if (start_marked) {
+				param.length++;
+				// TODO (kyokeun): INT_MAX should be the maximum
+				//                 allowed extent size. This
+				//                 actually should not happen,
+				//                 since max block size supported
+				//                 by each group is INT_MAX...
+				if (param.length == INT_MAX) {
+					start_marked = 0;
+					if (evfs_copy_param(&iter, &param,
+								sizeof(struct __evfs_fsp_iter_param))) {
+						unlock_buffer(bh);
+						brelse(bh);
+						err = 1;
+						goto out;
+					}
+				}
+			}
+		}
+		// TODO (kyokeun): Need to check for trailing freesp here.
+		if (start_marked) {
+			start_marked = 0;
+			if (evfs_copy_param(&iter, &param,
+						sizeof(struct __evfs_fsp_iter_param))) {
+				unlock_buffer(bh);
+				brelse(bh);
+				err = 1;
+				goto out;
+			}
+		}
+		unlock_buffer(bh);
+		brelse(bh);
+		off_block = 0;
+	}
+
+out:
+	if (copy_to_user((struct evfs_iter_ops __user *) arg, &iter,
+				sizeof(struct evfs_iter_ops)))
+		return -EFAULT;
+	return err;
+}
+
+long
 ext4_evfs_sb_get(struct super_block *sb, unsigned long arg)
 {
 	struct evfs_super_block evfs_sb;
@@ -903,6 +1058,8 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return ext4_evfs_extent_free(filp, sb, arg);
 	case FS_IOC_EXTENT_ITERATE:
 		return ext4_evfs_extent_iter(filp, sb, arg);
+	case FS_IOC_FREESP_ITERATE:
+		return ext4_evfs_freesp_iter(filp, sb, arg);
 	case FS_IOC_SUPER_GET:
 		return ext4_evfs_sb_get(sb, arg);
 	}

@@ -131,7 +131,6 @@ struct evfs_inode_iter {
 #define EVFS_EXTENT_ALLOC_MASK (EVFS_EXTENT_ALLOC_FIXED)
 
 struct evfs_extent_alloc_op {
-    unsigned long ino_nr;
     unsigned long flags;
     struct evfs_extent extent;
 };
