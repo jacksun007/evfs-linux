@@ -307,6 +307,8 @@ static void mb_clear_bits(void *bm, int cur, int len)
 }
 
 extern noinline_for_stack
+int ext4_mb_init_group(struct super_block *sb, ext4_group_t group, gfp_t gfp);
+extern noinline_for_stack
 int ext4_mb_find_by_goal(struct ext4_allocation_context *ac,
 				struct ext4_buddy *e4b);
 extern noinline_for_stack int

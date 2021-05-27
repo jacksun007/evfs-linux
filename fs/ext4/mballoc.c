@@ -971,7 +971,7 @@ static void ext4_mb_put_buddy_page_lock(struct ext4_buddy *e4b)
  * block group lock of all groups for this page; do not hold the BG lock when
  * calling this routine!
  */
-static noinline_for_stack
+noinline_for_stack
 int ext4_mb_init_group(struct super_block *sb, ext4_group_t group, gfp_t gfp)
 {
 

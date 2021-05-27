@@ -314,10 +314,10 @@ struct ext4_group_desc * ext4_get_group_desc(struct super_block *sb,
  * Return the block number which was discovered to be invalid, or 0 if
  * the block bitmap is valid.
  */
-static ext4_fsblk_t ext4_valid_block_bitmap(struct super_block *sb,
-					    struct ext4_group_desc *desc,
-					    ext4_group_t block_group,
-					    struct buffer_head *bh)
+ext4_fsblk_t ext4_valid_block_bitmap(struct super_block *sb,
+				    struct ext4_group_desc *desc,
+				    ext4_group_t block_group,
+				    struct buffer_head *bh)
 {
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
 	ext4_grpblk_t offset;

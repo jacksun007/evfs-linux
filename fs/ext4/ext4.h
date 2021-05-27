@@ -2465,6 +2465,10 @@ extern int ext4_group_add_blocks(handle_t *handle, struct super_block *sb,
 				ext4_fsblk_t block, unsigned long count);
 extern int ext4_trim_fs(struct super_block *, struct fstrim_range *);
 extern void ext4_process_freed_data(struct super_block *sb, tid_t commit_tid);
+extern ext4_fsblk_t ext4_valid_block_bitmap(struct super_block *sb,
+					    struct ext4_group_desc *desc,
+					    ext4_group_t block_group,
+					    struct buffer_head *bh);
 
 /* inode.c */
 int ext4_inode_is_fast_symlink(struct inode *inode);

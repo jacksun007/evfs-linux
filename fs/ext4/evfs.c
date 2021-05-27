@@ -547,16 +547,10 @@ ext4_evfs_inode_iter(struct file *filp, struct super_block *sb,
 		 *                 in consideration of (i.e., concurrency could
 		 *                 be a problem since we don't hold onto the bitmap)
 		 *                 It seems to work fine for basic cases.
-		 *
-		 *                 Another problem is that when running
-		 *                 inoiter multiple times, csum_verify
-		 *                 function passes. This is a problem
-		 *                 since we shouldn't be trying to read
-		 *                 a bitmap that has not been initialized.
 		 */
+		lock_buffer(bh);
 		if (!buffer_uptodate(bh)) {
 			ext4_msg(sb, KERN_ERR, "group %d buffer not up to date!", group);
-			lock_buffer(bh);
 			get_bh(bh);
 			bh->b_end_io = end_buffer_read_sync;
 			submit_bh(REQ_OP_READ, REQ_META | REQ_PRIO, bh);
@@ -567,15 +561,15 @@ ext4_evfs_inode_iter(struct file *filp, struct super_block *sb,
 				brelse(bh);
 				continue;
 			}
-			if (!ext4_inode_bitmap_csum_verify(sb, group, gdp, bh, EXT4_INODES_PER_GROUP(sb) / 8)) {
-				ext4_msg(sb, KERN_ERR, "group %d bitmap failed to verify!", group);
-				unlock_buffer(bh);
-				brelse(bh);
-				continue;
-			}
 			set_buffer_uptodate(bh);
-			unlock_buffer(bh);
 		}
+		if (!ext4_inode_bitmap_csum_verify(sb, group, gdp, bh, EXT4_INODES_PER_GROUP(sb) / 8)) {
+			ext4_msg(sb, KERN_ERR, "group %d bitmap failed to verify!", group);
+			brelse(bh);
+			unlock_buffer(bh);
+			continue;
+		}
+		unlock_buffer(bh);
 		for (; ino_offset < EXT4_INODES_PER_GROUP(sb); ino_offset++) {
 			if (mb_test_bit(ino_offset, bh->b_data)) {
 				ino_nr = (group * EXT4_INODES_PER_GROUP(sb)) + ino_offset + 1;
@@ -775,6 +769,7 @@ ext4_evfs_extent_alloc(struct file *filp, struct super_block *sb,
 	ac.ac_g_ex.fe_start = off_block;
 	ac.ac_g_ex.fe_len = op.length;
 	ac.ac_found = 0;
+	ac.ac_flags = EXT4_MB_HINT_TRY_GOAL;
 
 	err = ext4_mb_find_by_goal(&ac, &e4b);
 	if (err) {
@@ -791,6 +786,7 @@ ext4_evfs_extent_alloc(struct file *filp, struct super_block *sb,
 
 	err = ext4_mb_mark_diskspace_used(&ac, handle, 0);
 	if (err) {
+		ext4_error(sb, "Failed while marking diskspace");
 		ext4_discard_allocated_blocks(&ac);
 		goto out;
 	}
@@ -867,6 +863,7 @@ ext4_evfs_freesp_iter(struct file *filp, struct super_block *sb,
 	struct evfs_iter_ops iter;
 	struct __evfs_fsp_iter_param param = { 0 };
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
+	struct ext4_group_info *grp;
 	struct ext4_group_desc *gdp;
 	struct buffer_head *bh;
 	ext4_group_t group, max_groups = ext4_get_groups_count(sb);
@@ -878,17 +875,19 @@ ext4_evfs_freesp_iter(struct file *filp, struct super_block *sb,
 				sizeof(struct evfs_iter_ops)))
 		return -EFAULT;
 	iter.count = 0;
+	if (iter.start_from < le32_to_cpu(sbi->s_es->s_first_data_block))
+		iter.start_from = le32_to_cpu(sbi->s_es->s_first_data_block);
 	ext4_get_group_no_and_offset(sb, iter.start_from, &group, &off_block);
 	if (max_groups < group) {
+		ext4_msg(sb, KERN_ERR, "max group: %d, group: %d", max_groups, group);
 		ext4_error(sb, "Givern physical addres (%lu) out of range",
 				iter.start_from);
 		return -EINVAL;
 	}
 
-	ext4_msg(sb, KERN_ERR, "max block %lu", EXT4_BLOCKS_PER_GROUP(sb));
-
 	for (; group < max_groups; group++) {
 		gdp = ext4_get_group_desc(sb, group, NULL);
+		grp = ext4_get_group_info(sb, group);
 		if (!gdp) {
 			ext4_msg(sb, KERN_ERR, "group %d invalid", group);
 			continue;
@@ -902,6 +901,11 @@ ext4_evfs_freesp_iter(struct file *filp, struct super_block *sb,
 		 *                 of the provided extent from EVFS interface
 		 *                 might be larger than max supported by EXT4.
 		 */
+		if (unlikely(EXT4_MB_GRP_NEED_INIT(grp))) {
+			if (ext4_mb_init_group(sb, group, GFP_NOFS))
+				continue;
+		}
+		ext4_lock_group(sb, group);
 		lock_buffer(bh);
 		if (!buffer_uptodate(bh)) {
 			ext4_msg(sb, KERN_ERR, "group %d buffer not up to date!", group);
@@ -911,15 +915,7 @@ ext4_evfs_freesp_iter(struct file *filp, struct super_block *sb,
 			wait_on_buffer(bh);
 			if (!buffer_uptodate(bh)) {
 				ext4_msg(sb, KERN_ERR, "group %d buffer can't fetch!", group);
-				unlock_buffer(bh);
-				brelse(bh);
-				continue;
-			}
-			if (!ext4_block_bitmap_csum_verify(sb, group, gdp, bh)) {
-				ext4_msg(sb, KERN_ERR, "group %d bitmap, failed to verify!", group);
-				unlock_buffer(bh);
-				brelse(bh);
-				continue;
+				goto cleanup;
 			}
 			set_buffer_uptodate(bh);
 		}
@@ -933,44 +929,44 @@ ext4_evfs_freesp_iter(struct file *filp, struct super_block *sb,
 				start_marked = 0;
 				if (evfs_copy_param(&iter, &param,
 							sizeof(struct __evfs_fsp_iter_param))) {
-					unlock_buffer(bh);
-					brelse(bh);
 					err = 1;
-					goto out;
+					goto cleanup;
 				}
 			} else if (start_marked) {
 				param.length++;
-				// TODO (kyokeun): INT_MAX should be the maximum
-				//                 allowed extent size. This
-				//                 actually should not happen,
-				//                 since max block size supported
-				//                 by each group is INT_MAX...
+				/*
+				 * TODO (kyokeun): INT_MAX should be the maximum
+				 *                 allowed extent size. This
+				 *                 actually should not happen,
+				 *                 since max block size supported
+				 *                 by each group is INT_MAX...
+				 */
 				if (param.length == INT_MAX) {
 					start_marked = 0;
 					if (evfs_copy_param(&iter, &param,
 								sizeof(struct __evfs_fsp_iter_param))) {
-						unlock_buffer(bh);
-						brelse(bh);
 						err = 1;
-						goto out;
+						goto cleanup;
 					}
 				}
 			}
 		}
-		// TODO (kyokeun): Need to check for trailing freesp here.
+		// Need to check for trailing freesp here.
 		if (start_marked) {
 			start_marked = 0;
 			if (evfs_copy_param(&iter, &param,
 						sizeof(struct __evfs_fsp_iter_param))) {
-				unlock_buffer(bh);
-				brelse(bh);
 				err = 1;
-				goto out;
+				goto cleanup;
 			}
 		}
+cleanup:
 		unlock_buffer(bh);
+		ext4_unlock_group(sb, group);
 		brelse(bh);
 		off_block = 0;
+		if (err)
+			goto out;
 	}
 
 out:
