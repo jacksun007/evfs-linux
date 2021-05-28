@@ -28,6 +28,7 @@ struct evfs_extent {
 struct evfs_super_block {
     unsigned long max_extent; /* maximum allowed size of a given extent */
     unsigned long max_bytes; /* max file size */
+    unsigned long block_count; /* total number of data blocks available */
     unsigned long page_size;
     unsigned long root_ino; /* root inode number */
 };
@@ -124,6 +125,40 @@ struct evfs_freesp_iter {
 struct evfs_inode_iter {
     void *priv;
     long (*cb) (unsigned long ino_nr, struct evfs_inode *i, void *priv);
+};
+
+#define EVFS_META_DYNAMIC 0x1
+#define EVFS_META_STATIC  0x2
+
+#define EVFS_META_FILE 		0x1
+#define EVFS_META_DIRECTORY 	0x2
+#define EVFS_META_INDIR 	0x3
+#define EVFS_META_UNKNOWN 	0xff
+
+struct evfs_metadata {
+    unsigned long blkaddr;
+    unsigned long size; // Block-level granularity
+    unsigned long owner; // TODO: Does it make sense for this to be just inode? Maybe optional?
+    int loc_type;
+    int type;
+
+    /* TODO: In order to be able to move metadata, the user needs
+     *       some idea of where they can move the data to. Returning
+     *       this "meta region" should help with that, but not entirely
+     *       sure if it makes sense to be in this struct.
+     */
+    unsigned long region_start;
+    unsigned long region_len;
+};
+
+struct evfs_meta_mv_ops {
+    struct evfs_metadata md;
+    unsigned long to_blkaddr;
+};
+
+struct __evfs_meta_iter {
+    unsigned int id;
+    struct evfs_metadata md;
 };
 
 // TODO(tbrindus): might want to switch f2fs to use this, maybe
@@ -301,6 +336,9 @@ struct evfs_atomic_action {
 #define FS_IOC_FREESP_ITERATE _IOR('f', 81, struct evfs_iter_ops)
 #define FS_IOC_INODE_ITERATE _IOR('f', 82, struct evfs_iter_ops)
 #define FS_IOC_SUPER_GET _IOR('f', 83, struct evfs_super_block)
+#define FS_IOC_SUPER_SET _IOWR('f', 84, struct evfs_super_block)
+#define FS_IOC_META_MOVE _IOR('f', 85, struct evfs_meta_mv_ops)
+#define FS_IOC_META_ITER _IOR('f', 86, struct evfs_iter_ops)
 #define FS_IOC_EVFS_ACTION _IOWR('f', 96, struct evfs_atomic_action)
 
 // fs/evfs.c

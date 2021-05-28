@@ -450,3 +450,6 @@ static inline void set_mark(struct page *page, int mark, int type)
 }
 #define set_dentry_mark(page, mark)	set_mark(page, mark, DENT_BIT_SHIFT)
 #define set_fsync_mark(page, mark)	set_mark(page, mark, FSYNC_BIT_SHIFT)
+
+void set_node_addr(struct f2fs_sb_info *sbi, struct node_info *ni,
+				   block_t new_blkaddr, bool fsync_done);

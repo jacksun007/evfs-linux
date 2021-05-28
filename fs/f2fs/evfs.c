@@ -48,6 +48,77 @@ __do_map_lock(struct f2fs_sb_info *sbi, int flag, bool lock)
 	}
 }
 
+static struct f2fs_summary *
+get_sum_entry(struct f2fs_sb_info *sbi, block_t blkaddr)
+{
+	unsigned int segno = GET_SEGNO(sbi, blkaddr);
+	struct seg_entry *se = get_seg_entry(sbi, segno);
+	struct curseg_info *curseg = CURSEG_I(sbi, se->type);
+	struct f2fs_summary *sum = NULL;
+	block_t blkoff = blkaddr - START_BLOCK(sbi, segno);
+
+	if (segno == curseg->segno) {
+		sum = curseg->sum_blk->entries + blkoff;
+	} else {
+		struct page *sum_page = get_meta_page(sbi,
+						GET_SUM_BLOCK(sbi, segno));
+		struct f2fs_summary_block *sum_block;
+
+		unlock_page(sum_page);
+		sum_block = (struct f2fs_summary_block *)page_address(sum_page);
+		sum = sum_block->entries + blkoff;
+
+		f2fs_put_page(sum_page, 0);
+	}
+
+	return sum;
+}
+
+/* Reference: set_node_addr from node.c */
+static inline void
+evfs_write_node_page(unsigned int nid, struct f2fs_io_info *fio, int type)
+{
+	struct f2fs_sb_info *sbi = fio->sbi;
+	struct curseg_info *curseg = CURSEG_I(sbi, type);
+	struct f2fs_summary sum;
+	int err, prev_segno = curseg->segno, target_segno = GET_SEGNO(sbi, fio->new_blkaddr);
+
+	/*
+	 * We need to change the curseg in order to allocate node block.
+	 * In order to make this as transparent as possible, switch back to
+	 * old segno after we are done.
+	 */
+	if (prev_segno != target_segno) {
+		curseg->next_segno = target_segno;
+		change_curseg(sbi, type, true);
+	}
+
+	set_summary(&sum, nid, 0, 0);
+
+reallocate:
+	evfs_alloc_data_block(sbi, fio->page, fio->old_blkaddr,
+						  &fio->new_blkaddr, &sum, type, fio, true);
+
+	/* writeout dirty page into bdev */
+	err = f2fs_submit_page_write(fio);
+	if (err == -EAGAIN) {
+		fio->old_blkaddr = fio->new_blkaddr;
+		goto reallocate;
+	}
+
+	/* Restore curseg after we are done, if possible */
+	if (prev_segno != curseg->segno && test_bit(prev_segno, FREE_I(sbi)->free_segmap)) {
+		curseg->next_segno = prev_segno;
+		change_curseg(sbi, type, true);
+	}
+}
+
+static inline bool
+is_valid_segment(int type, int is_nodeseg)
+{
+	return (IS_DATASEG(type) && !is_nodeseg) || (IS_NODESEG(type) && is_nodeseg);
+}
+
 long
 f2fs_extent_check(struct f2fs_sb_info *sbi, block_t start,
 		block_t length, enum evfs_query type)
@@ -79,6 +150,36 @@ f2fs_extent_check(struct f2fs_sb_info *sbi, block_t start,
 		return 1;
 	}
 	return -EFAULT;
+}
+
+/*
+ * Look for a valid segment that can be used as next curseg that is
+ * smaller than end_seg
+ * If usable segment is found, modify the curseg->next_segno. Otherwise,
+ * do not modify anything.
+ */
+static bool
+find_next_curseg(struct f2fs_sb_info *sbi, struct curseg_info *curseg,
+				 int type, unsigned short end_seg)
+{
+	unsigned short segno, contander = 0;
+	block_t freesp = SEGMENT_SIZE(sbi);
+	bool found = false;
+	struct seg_entry *se;
+
+	for (segno = 0; segno < end_seg; segno++) {
+		se = get_seg_entry(sbi, segno);
+		if (se->type == type && se->valid_blocks < freesp) {
+			freesp = se->valid_blocks;
+			contander = segno;
+			found = true;
+		}
+	}
+
+	if (found)
+		curseg->next_segno = contander;
+
+	return found;
 }
 
 /*
@@ -218,6 +319,94 @@ sync_out:
 unlock_out:
 	__do_map_lock(sbi, F2FS_MAP_NEW, false);
 	f2fs_balance_fs(sbi, dn.node_changed);
+	return ret;
+}
+
+
+static long
+__metadata_move(struct f2fs_sb_info *sbi, block_t from_addr,
+			block_t to_addr)
+{
+	struct f2fs_summary *sum;
+	struct seg_entry *from_se, *to_se;
+	struct node_info ni;
+	struct page *page;
+	struct writeback_control wbc = {
+		.sync_mode = WB_SYNC_ALL,
+		.nr_to_write = 1,
+		.for_reclaim = 0
+	};
+	struct f2fs_io_info fio = {
+		.sbi = sbi,
+		.type = NODE,
+		.op = REQ_OP_WRITE,
+		.op_flags = wbc_to_write_flags(&wbc),
+		.page = NULL,
+		.encrypted_page = NULL,
+		.submitted = false,
+	};
+	nid_t nid;
+	unsigned int from_segno, to_segno;
+	int ret = 0;
+
+	from_segno = GET_SEGNO(sbi, from_addr);
+	from_se = get_seg_entry(sbi, from_segno);
+	to_segno = GET_SEGNO(sbi, to_addr);
+	to_se = get_seg_entry(sbi, to_segno);
+
+	/* Make sure that we are working with node segment */
+	if (!IS_NODESEG(from_se->type) || !IS_NODESEG(to_se->type)) {
+		f2fs_msg(sbi->sb, KERN_ERR, "Original or destination address is not "
+				 "a part node segment");
+		return -EFAULT;
+	}
+
+	if (!f2fs_test_bit(GET_BLKOFF_FROM_SEG0(sbi, to_addr), to_se->cur_valid_map)) {
+		f2fs_msg(sbi->sb, KERN_ERR, "Destination address is not allocated");
+		return -EINVAL; // TODO: Find a better error code
+	}
+
+	sum = get_sum_entry(sbi, from_addr);
+	nid = le32_to_cpu(sum->nid);
+	page = get_node_page(sbi, nid);
+	if (!page) {
+		f2fs_msg(sbi->sb, KERN_ERR, "eVFS metadata move: cannot retrieve node page");
+		return -EFAULT;
+	}
+
+	/* Reference: fs/f2fs/node.c:__write_node_page */
+	if (wbc.for_reclaim) {
+		if (!down_read_trylock(&sbi->node_write)) {
+			ret = -EFAULT;
+			unlock_page(page);
+			goto out;
+		}
+	} else {
+		down_read(&sbi->node_write);
+	}
+
+	get_node_info(sbi, nid, &ni);
+
+	fio.page = page;
+	fio.old_blkaddr = ni.blk_addr;
+	fio.new_blkaddr = to_addr;
+
+	set_page_dirty(page);
+	set_node_addr(sbi, &ni, to_addr, is_fsync_dnode(page));
+	set_page_writeback(page);
+	evfs_write_node_page(nid, &fio, to_se->type);
+	dec_page_count(sbi, F2FS_DIRTY_NODES);
+	up_read(&sbi->node_write);
+	unlock_page(page);
+
+	invalidate_blocks(sbi, from_addr);
+
+	f2fs_wait_on_page_writeback(page, NODE, true);
+	if (wbc.for_reclaim)
+		f2fs_submit_merged_write_cond(sbi, page->mapping->host, 0,
+									  page->index, NODE);
+
+out:
 	return ret;
 }
 
@@ -986,6 +1175,164 @@ f2fs_evfs_sb_get(struct super_block *sb, unsigned long arg)
 	return 0;
 }
 
+
+long
+f2fs_evfs_sb_set(struct super_block *sb, unsigned long arg)
+{
+	struct evfs_super_block evfs_sb;
+	struct f2fs_sb_info *sbi = F2FS_SB(sb);
+	struct f2fs_super_block *f2fs_sb = F2FS_RAW_SUPER(sbi);
+	struct f2fs_checkpoint *ckpt = F2FS_CKPT(sbi);
+	block_t main_blkaddr = MAIN_BLKADDR(sbi);
+	unsigned int seg_nr, seg_nr_main, block_nr;
+	long long bc_delta = le64_to_cpu(f2fs_sb->block_count);
+	int ret = 0, type;
+
+	if (copy_from_user(&evfs_sb, (struct evfs_super_block __user *) arg,
+				sizeof(struct evfs_super_block))) {
+		f2fs_msg(sb, KERN_ERR, "sb_set copying arg failed");
+		return -EFAULT;
+	}
+
+	if (evfs_sb.block_count == bc_delta)
+		goto out;
+
+	// TODO: It may be necessary for the block count to be segment-aligned
+	seg_nr = (evfs_sb.block_count + (sbi->blocks_per_seg / 2))
+		>> sbi->log_blocks_per_seg;
+	block_nr = seg_nr << sbi->log_blocks_per_seg;
+	seg_nr_main = (block_nr - main_blkaddr) >> sbi->log_blocks_per_seg;
+	bc_delta -= block_nr;
+
+	/*
+	 * Make sure that all cursegs are within the new range
+	 */
+	for (type = 0; type < NR_CURSEG_TYPE; type++) {
+		struct curseg_info *curseg = CURSEG_I(sbi, type);
+
+		f2fs_msg(sb, KERN_INFO, "curseg segno: %u, curseg type: %u, next_segno: %u",
+				curseg->segno, type, curseg->next_segno);
+
+		if (curseg->segno > seg_nr_main) {
+			f2fs_msg(sb, KERN_INFO, "sb_set detected curseg (type %d)"
+					"which is out of bounds. Attempting "
+					"to relocate", type);
+			if (!find_next_curseg(sbi, curseg, type, seg_nr_main)) {
+				f2fs_msg(sb, KERN_ERR, "Relocation failed"
+						 " (no free space available). Aborting...");
+				ret = -ENOSPC;
+				goto out;
+			}
+			change_curseg(sbi, type, true);
+			f2fs_msg(sb, KERN_INFO, "sb_set: Newly assigned segno "
+					"is %u", curseg->segno);
+		}
+	}
+
+	/*
+	 * In order to update the block size in F2FS,
+	 * couple of variables below needs to be updated as well
+	 * in order for it to be consistent
+	 */
+	f2fs_sb->block_count = cpu_to_le64(block_nr);
+	sbi->user_block_count -= bc_delta;
+	ckpt->user_block_count = cpu_to_le64(sbi->user_block_count);
+	f2fs_sb->segment_count = cpu_to_le32(seg_nr - 1);
+	sbi->total_sections = (seg_nr - 1) / sbi->segs_per_sec;
+	f2fs_sb->section_count = cpu_to_le32(sbi->total_sections);
+	f2fs_sb->segment_count_main = cpu_to_le32((block_nr - main_blkaddr)
+					>> sbi->log_blocks_per_seg);
+
+	if ((ret = f2fs_commit_super(sbi, 0))) {
+		f2fs_msg(sb, KERN_ERR, "sb_set failed to commit super");
+	}
+
+	f2fs_sync_fs(sb, 1);
+
+out:
+	return ret;
+}
+
+long
+f2fs_evfs_meta_iter(struct super_block *sb, unsigned long arg)
+{
+	struct evfs_iter_ops iter;
+	struct __evfs_meta_iter param;
+	struct f2fs_sb_info *sbi = F2FS_SB(sb);
+	struct f2fs_nm_info *nm = NM_I(sbi);
+	struct node_info ni;
+	nid_t end_nid = nm->max_nid, nid = 0;
+	int ret = 0;
+
+	if (copy_from_user(&iter, (struct evfs_iter_ops __user *) arg,
+				sizeof(struct evfs_iter_ops)))
+		return -EFAULT;
+
+	iter.count = 0;
+	nid = iter.start_from;
+
+	for (; nid < end_nid; nid++) {
+		get_node_info(sbi, nid, &ni);
+
+		if (ni.blk_addr < MAIN_BLKADDR(sbi))
+			continue;
+
+		if (ni.nid == ni.ino) {
+			struct inode *inode = f2fs_iget(sb, ni.nid);
+
+			if (IS_ERR(inode))
+				continue;
+
+			if (S_ISDIR(inode->i_mode))
+				param.md.type = EVFS_META_DIRECTORY;
+			else if (S_ISREG(inode->i_mode))
+				param.md.type = EVFS_META_FILE;
+			else
+				param.md.type = EVFS_META_UNKNOWN;
+
+			iput(inode);
+		} else {
+			param.md.type = EVFS_META_INDIR;
+		}
+
+		param.id = ni.nid;
+		param.md.owner = ni.ino;
+		param.md.blkaddr = ni.blk_addr;
+		param.md.size = 1;
+		param.md.loc_type = EVFS_META_DYNAMIC;
+		param.md.region_start = START_BLOCK(sbi, GET_SEGNO(sbi, ni.blk_addr));
+		param.md.region_len = 1ULL << sbi->log_blocks_per_seg;
+
+		if (evfs_copy_param(&iter, &param,
+				sizeof(struct __evfs_meta_iter))) {
+			ret = 1;
+			goto out;
+		}
+	}
+
+out:
+	if (copy_to_user((struct evfs_iter_ops __user *) arg, &iter,
+				sizeof(struct evfs_iter_ops)))
+		return -EFAULT;
+	f2fs_msg(sb, KERN_INFO, "return value: %d, iter_count: %lu",
+				ret, iter.count);
+	return ret;
+}
+
+
+long
+f2fs_evfs_meta_move(struct super_block *sb, unsigned long arg)
+{
+	struct f2fs_sb_info *sbi = F2FS_SB(sb);
+	struct evfs_meta_mv_ops op;
+
+	if (copy_from_user(&op, (struct evfs_meta_mv_ops __user *) arg,
+				sizeof(struct evfs_meta_mv_ops)))
+		return -EFAULT;
+
+	return __metadata_move(sbi, op.md.blkaddr, op.to_blkaddr);
+}
+
 static
 long
 f2fs_evfs_inode_lock(struct super_block * sb, struct evfs_lockable * lkb)
@@ -1179,6 +1526,12 @@ f2fs_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return f2fs_evfs_dirent_remove(filp, sb, arg);
 	case FS_IOC_SUPER_GET:
 		return f2fs_evfs_sb_get(sb, arg);
+	case FS_IOC_SUPER_SET:
+		return f2fs_evfs_sb_set(sb, arg);
+	case FS_IOC_META_MOVE:
+		return f2fs_evfs_meta_move(sb, arg);
+	case FS_IOC_META_ITER:
+		return f2fs_evfs_meta_iter(sb, arg);
 	}
 
 	return -ENOTTY;

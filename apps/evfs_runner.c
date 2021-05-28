@@ -455,6 +455,85 @@ int evfs_sbget(int fd, int argc, char **argv)
 		sb.page_size, sb.root_ino);
 }
 
+int evfs_sbset(int fd, int argc, char **argv)
+{
+	int ret = 0;
+	struct evfs_super_block sb;
+
+	if (argc != 1) {
+		fprintf(stderr, "usage: evfs_runner sbset <block count>\n");
+		return 1;
+	}
+
+	ret = ioctl(fd, FS_IOC_SUPER_GET, &sb);
+	if (ret < 0) {
+		perror("sbset super get");
+		return 1;
+	}
+
+	sb.block_count = strtoll(argv[0], NULL, 10);
+
+	ret = ioctl(fd, FS_IOC_SUPER_SET, &sb);
+	if (ret < 0) {
+		perror("sbset super set");
+		return 1;
+	}
+
+	return ret;
+}
+
+int evfs_mditer(int fd, int argc, char **argv)
+{
+	struct evfs_iter_ops iter = { .start_from = 0 };
+	struct __evfs_meta_iter *param;
+	int ret = 0, count = 0;
+
+iterate:
+	ret = ioctl(fd, FS_IOC_META_ITER, &iter);
+	if (ret < 0) {
+		perror("meta iter");
+		return 1;
+	}
+
+	while (count < iter.count) {
+		param = ((struct __evfs_meta_iter *) iter.buffer) + count;
+		printf("id: %lu, blkaddr: %lu, type: %u, loc_type: %u,"
+				" iter_count: %lu\n",
+				param->id, param->md.blkaddr, param->md.type,
+				param->md.loc_type, iter.count);
+		++count;
+	}
+
+	count = 0;
+	iter.start_from = param->id + 1;
+	if (ret)
+		goto iterate;
+
+	return 0;
+}
+
+int evfs_mdmove(int fd, int argc, char **argv)
+{
+	struct evfs_meta_mv_ops ops;
+	int ret = 0;
+
+	if (argc != 2) {
+		fprintf(stderr, "usage: evfs_runner mdmove from_addr to_addr\n");
+		return -1;
+	}
+
+	ops.md.blkaddr = strtoll(argv[0], NULL, 10);
+	ops.to_blkaddr = strtoll(argv[1], NULL, 10);
+
+	ret = ioctl(fd, FS_IOC_META_MOVE, &ops);
+	if (ret < 0) {
+		perror("mdmove");
+		return ret;
+	}
+
+	return ret;
+}
+
 int main(int argc, char **argv)
 {
 	char *command;
@@ -509,6 +588,12 @@ int main(int argc, char **argv)
 		command_fn = &evfs_drm;
 	else if (!strcmp(command, "sbget"))
 		command_fn = &evfs_sbget;
+	else if (!strcmp(command, "sbset"))
+		command_fn = &evfs_sbset;
+	else if (!strcmp(command, "mditer"))
+		command_fn = &evfs_mditer;
+	else if (!strcmp(command, "mdmove"))
+		command_fn = &evfs_mdmove;
 	else
 		command_fn = NULL;
 

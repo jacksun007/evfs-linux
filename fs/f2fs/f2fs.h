@@ -2353,6 +2353,10 @@ void allocate_data_block(struct f2fs_sb_info *sbi, struct page *page,
 			block_t old_blkaddr, block_t *new_blkaddr,
 			struct f2fs_summary *sum, int type,
 			struct f2fs_io_info *fio, bool add_list);
+void evfs_alloc_data_block(struct f2fs_sb_info *sbi, struct page *page,
+			block_t old_blkaddr, block_t *new_blkaddr,
+			struct f2fs_summary *sum, int type,
+			struct f2fs_io_info *fio, bool add_list);
 void f2fs_wait_on_page_writeback(struct page *page,
 			enum page_type type, bool ordered);
 void f2fs_wait_on_encrypted_page_writeback(struct f2fs_sb_info *sbi,
@@ -2368,6 +2372,7 @@ int __init create_segment_manager_caches(void);
 void destroy_segment_manager_caches(void);
 int reserve_extents(struct f2fs_sb_info *sbi, block_t start,
 		block_t length, int use_hint);
+void change_curseg(struct f2fs_sb_info *sbi, int type, bool reuse);
 
 /*
  * checkpoint.c

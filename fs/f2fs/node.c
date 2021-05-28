@@ -290,7 +290,7 @@ static void cache_nat_entry(struct f2fs_sb_info *sbi, nid_t nid,
 	}
 }
 
-static void set_node_addr(struct f2fs_sb_info *sbi, struct node_info *ni,
+void set_node_addr(struct f2fs_sb_info *sbi, struct node_info *ni,
 			block_t new_blkaddr, bool fsync_done)
 {
 	struct f2fs_nm_info *nm_i = NM_I(sbi);
