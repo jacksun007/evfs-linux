@@ -254,8 +254,7 @@ enum evfs_opcode {
     EVFS_DIRENT_RENAME, // unlike update, this *keeps* content but changes id
     
     // inode-specific operations
-    EVFS_INODE_MAP,     // also "remaps"
-    EVFS_INODE_UNMAP,
+    EVFS_INODE_MAP,    
     EVFS_INODE_UPDATE,
     
     EVFS_SUPER_UPDATE,
@@ -266,6 +265,7 @@ struct evfs_read_op {
     
     union {
         struct evfs_inode inode;    /* for inode_info */
+        struct evfs_extent extent;  /* for extent-related operations */
     };
 };
 
