@@ -34,7 +34,7 @@ int evfs_ealloc(int fd, int argc, char **argv)
 			printf("Hint failed. No actions taken.\n");
 		else
 			printf("Hint failed. Created extent starting %d with "
-					"length of %d\n", ext.start, ext.length);
+					"length of %d\n", ret, ext.length);
 	} else {
 		printf("Hint successful. Created extent starting %d with "
 				"length of %d\n", ext.start, ext.length);
@@ -95,7 +95,7 @@ int evfs_eactive(int fd, int argc, char **argv)
 
 int evfs_ewrite(int fd, int argc, char **argv)
 {
-	const int nbytes = 12000;
+	const int nbytes = 4096;
 	struct evfs_ext_write_op op;
 	char *data = malloc(nbytes);
 
@@ -111,7 +111,7 @@ int evfs_ewrite(int fd, int argc, char **argv)
 	memset(data, 'a', nbytes);
 
 	if (ioctl(fd, FS_IOC_EXTENT_WRITE, &op)) {
-		perror("ioctl");
+		perror("ewrite");
 		return 1;
 	}
 
@@ -337,18 +337,19 @@ int evfs_iunmap(int fd, int argc, char **argv)
 {
 	struct evfs_imap evfs_i;
 
-	if (argc != 3) {
+	if (argc != 4) {
 		fprintf(stderr, "usage: evfs_runner iunmap <ino nr> <length> "
-				"<logical blk>\n");
+				"<logical blk> <flag>\n");
 		return 1;
 	}
 
 	evfs_i.ino_nr = strtoll(argv[0], NULL, 10);
 	evfs_i.length = strtoll(argv[1], NULL, 10);
 	evfs_i.log_blkoff = strtoll(argv[2], NULL, 10);
+	evfs_i.flag = strtoll(argv[3], NULL, 10);
 
 	if (ioctl(fd, FS_IOC_INODE_UNMAP, &evfs_i) < 0) {
-		perror("ioctl");
+		perror("iunmap");
 		return 1;
 	}
 

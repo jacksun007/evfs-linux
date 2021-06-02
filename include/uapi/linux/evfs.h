@@ -76,11 +76,14 @@ struct evfs_inode {
     };
 };
 
+#define EVFS_IMAP_UNMAP_ONLY 0x1 /* Only unmap rather than free as well */
+
 struct evfs_imap {
     unsigned long ino_nr;
     u32 log_blkoff;
     u32 phy_blkoff;
     unsigned long length;
+    unsigned long flag;
 };
 
 struct evfs_inode_read_op {
