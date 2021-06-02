@@ -447,6 +447,9 @@ ext4_evfs_inode_map(struct file *filp, struct super_block *sb,
 		err = -EINVAL;
 	}
 
+	inode->i_blocks += evfs_i.length;
+	inode->i_size += evfs_i.length * PAGE_SIZE;
+
 	/* TODO: Similar to down_write, remove when inode lock is implemented */
 	up_write(&EXT4_I(inode)->i_data_sem);
 	ext4_unlock_group(sb, fex.fe_group);
@@ -488,20 +491,25 @@ ext4_evfs_inode_unmap(struct file *filp, struct super_block *sb,
 		return -EINVAL;
 	}
 
-	/* TODO: This should be removed later on when EVFS handles inode locking separately */
-	down_write(&EXT4_I(inode)->i_data_sem);
+	if (evfs_i.flag & EVFS_IMAP_UNMAP_ONLY) {
+		/* TODO: This should be removed later on when EVFS handles inode locking separately */
+		down_write(&EXT4_I(inode)->i_data_sem);
 
-	if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
-		err = ext4_ext_unmap_space(inode, evfs_i.log_blkoff, evfs_i.log_blkoff + evfs_i.length);
+		if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
+			err = ext4_ext_unmap_space(inode, evfs_i.log_blkoff, evfs_i.log_blkoff + evfs_i.length);
+		} else {
+			// TODO:
+			ext4_msg(sb, KERN_ERR, "Inode %ld is NOT extent based!"
+				"EVFS operations currently not supported", inode->i_ino);
+			err = -EINVAL;
+		}
+
+		/* TODO: Similar to down_write, remove when inode lock is implemented */
+		up_write(&EXT4_I(inode)->i_data_sem);
 	} else {
-		// TODO:
-		ext4_msg(sb, KERN_ERR, "Inode %ld is NOT extent based!"
-			"EVFS operations currently not supported", inode->i_ino);
-		err = -EINVAL;
+		err = ext4_punch_hole(inode, start * PAGE_SIZE, evfs_i.length * PAGE_SIZE);
 	}
 
-	/* TODO: Similar to down_write, remove when inode lock is implemented */
-	up_write(&EXT4_I(inode)->i_data_sem);
 	fsync_bdev(sb->s_bdev);
 	iput(inode);
 	return err;
@@ -769,18 +777,22 @@ ext4_evfs_extent_alloc(struct file *filp, struct super_block *sb,
 	ac.ac_g_ex.fe_start = off_block;
 	ac.ac_g_ex.fe_len = op.length;
 	ac.ac_found = 0;
+	ac.ac_status = AC_STATUS_CONTINUE;
 	ac.ac_flags = EXT4_MB_HINT_TRY_GOAL;
+	ac.ac_inode = NULL;
+	if (ext_op.flags & EVFS_EXTENT_ALLOC_FIXED) {
+		ext4_msg(sb, KERN_ERR, "Hint goal only!");
+		ac.ac_flags |= EXT4_MB_HINT_GOAL_ONLY;
+	}
 
-	err = ext4_mb_find_by_goal(&ac, &e4b);
+	err = ext4_mb_regular_allocator(&ac);
 	if (err) {
 		ext4_error(sb, "ext4_mb_find_by_goal ERROR");
 		goto out;
 	}
 
 	if (ac.ac_status != AC_STATUS_FOUND) {
-		if (ext_op.flags & EVFS_EXTENT_ALLOC_FIXED)
-			goto out;
-		ext4_error(sb, "hint failed; this case needs to be implemented!");
+		ext4_msg(sb, KERN_ERR, "Failed to find space");
 		goto out;
 	}
 
@@ -791,7 +803,7 @@ ext4_evfs_extent_alloc(struct file *filp, struct super_block *sb,
 		goto out;
 	}
 
-	err = op.start;
+	err = group * EXT4_BLOCKS_PER_GROUP(sb) + ac.ac_b_ex.fe_start;
 
 out:
 	return err;
@@ -893,14 +905,6 @@ ext4_evfs_freesp_iter(struct file *filp, struct super_block *sb,
 			continue;
 		}
 		bh = sb_getblk(sb, ext4_block_bitmap(sb, gdp));
-		/*
-		 * TODO (kyokeun): Currently does not consider uninitialized groups.
-		 *
-		 *                 Furthermore, current code does not check for
-		 *                 maximum supported extent size, so the length
-		 *                 of the provided extent from EVFS interface
-		 *                 might be larger than max supported by EXT4.
-		 */
 		if (unlikely(EXT4_MB_GRP_NEED_INIT(grp))) {
 			if (ext4_mb_init_group(sb, group, GFP_NOFS))
 				continue;
@@ -976,11 +980,39 @@ out:
 	return err;
 }
 
+static long
+ext4_evfs_extent_write(struct file *filp, struct super_block *sb, unsigned long arg)
+{
+	struct evfs_ext_write_op write_op;
+	struct iovec iov;
+	struct iov_iter iter;
+	int err = 0;
+
+	if (copy_from_user(&write_op, (struct evfs_ext_write_op __user *) arg,
+					   sizeof(struct evfs_ext_write_op)))
+		return -EFAULT;
+
+	iov.iov_base = write_op.data;
+	iov.iov_len = write_op.length;
+	iov_iter_init(&iter, WRITE, &iov, 1, write_op.length);
+
+	err = evfs_perform_write(sb, &iter, write_op.addr);
+	if (iov.iov_len != err) {
+		ext4_msg(sb, KERN_ERR, "evfs_extent_write: expected to write "
+				"%lu bytes, but wrote %d bytes instead",
+				write_op.length, err);
+		return -EFAULT;
+	}
+	ext4_msg(sb, KERN_ERR, "err = %d", err);
+	return 0;
+}
+
 long
 ext4_evfs_sb_get(struct super_block *sb, unsigned long arg)
 {
 	struct evfs_super_block evfs_sb;
 
+	evfs_sb.block_count = EXT4_BLOCKS_PER_GROUP(sb) * ext4_get_groups_count(sb);
 	evfs_sb.max_extent = EXT_INIT_MAX_LEN;
 	evfs_sb.max_bytes = sb->s_maxbytes;
 	evfs_sb.page_size = PAGE_SIZE;
@@ -1036,6 +1068,8 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return ext4_evfs_inode_alloc(filp, sb, arg);
 	case FS_IOC_INODE_FREE:
 		return ext4_evfs_inode_free(filp, sb, arg);
+	case FS_IOC_EXTENT_WRITE:
+		return ext4_evfs_extent_write(filp, sb, arg);
 	case FS_IOC_INODE_GET:
 		return ext4_evfs_inode_get(filp, sb, arg);
 	case FS_IOC_INODE_READ:

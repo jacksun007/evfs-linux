@@ -314,4 +314,6 @@ int ext4_mb_find_by_goal(struct ext4_allocation_context *ac,
 extern noinline_for_stack int
 ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac,
 				handle_t *handle, unsigned int reserv_clstrs);
+extern noinline_for_stack int
+ext4_mb_regular_allocator(struct ext4_allocation_context *ac);
 extern void ext4_discard_allocated_blocks(struct ext4_allocation_context *ac);
