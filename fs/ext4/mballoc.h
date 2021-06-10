@@ -316,4 +316,9 @@ ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac,
 				handle_t *handle, unsigned int reserv_clstrs);
 extern noinline_for_stack int
 ext4_mb_regular_allocator(struct ext4_allocation_context *ac);
+extern int ext4_mb_load_buddy(struct super_block *sb, ext4_group_t group,
+			      struct ext4_buddy *e4b);
+extern void ext4_mb_unload_buddy(struct ext4_buddy *e4b);
+extern void mb_free_blocks(struct inode *inode, struct ext4_buddy *e4b,
+			   int first, int count);
 extern void ext4_discard_allocated_blocks(struct ext4_allocation_context *ac);

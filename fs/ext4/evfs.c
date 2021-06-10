@@ -59,7 +59,8 @@ struct buffer_head *find_entry(struct inode *dir, const char *name,
 	return ext4_find_entry(dir, &name_qs, de, NULL);
 }
 
-int dirent_remove(struct file *filep, struct super_block *sb,
+static long
+dirent_remove(struct file *filep, struct super_block *sb,
 		unsigned long arg) {
 	int retval;
 	struct buffer_head *bh;
@@ -118,7 +119,8 @@ out:
 	return retval;
 }
 
-int dirent_add(struct file *filep, struct super_block *sb, unsigned long arg) {
+static long
+dirent_add(struct file *filep, struct super_block *sb, unsigned long arg) {
 	struct evfs_dirent_add_op add_op;
 	struct inode *dir;
 	struct inode *entry_inode;
@@ -197,7 +199,7 @@ ext4_evfs_copy_timespec(struct evfs_timeval *to, struct timespec *from)
 	to->tv_usec = from->tv_nsec / 1000;
 }
 
-long
+static long
 ext4_evfs_inode_free(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
@@ -223,7 +225,7 @@ ext4_evfs_inode_free(struct file *filp, struct super_block *sb,
 	return err;
 }
 
-long
+static long
 ext4_evfs_inode_read(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
@@ -256,7 +258,7 @@ ext4_evfs_inode_read(struct file *filp, struct super_block *sb,
 	return 0;
 }
 
-long
+static long
 ext4_evfs_inode_get(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
@@ -299,7 +301,7 @@ ext4_evfs_inode_get(struct file *filp, struct super_block *sb,
 	return 0;
 }
 
-long
+static long
 ext4_evfs_inode_alloc(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
@@ -360,7 +362,7 @@ ext4_evfs_inode_alloc(struct file *filp, struct super_block *sb,
 	return 0;
 }
 
-long
+static long
 ext4_evfs_inode_map(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
@@ -464,7 +466,7 @@ out:
  * TODO: Currently no error when invalid request is received. Need to
  *       check and fix this.
  */
-long
+static long
 ext4_evfs_inode_unmap(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
@@ -515,7 +517,7 @@ ext4_evfs_inode_unmap(struct file *filp, struct super_block *sb,
 	return err;
 }
 
-long
+static long
 ext4_evfs_inode_iter(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
@@ -527,7 +529,6 @@ ext4_evfs_inode_iter(struct file *filp, struct super_block *sb,
 	struct buffer_head *bh;
 	ext4_group_t group, max_group = sbi->s_groups_count;
 	unsigned long ino_offset;
-	int inodes_per_block = sbi->s_inodes_per_block;
 	int ino_nr = sbi->s_first_ino;
 	int ret = 0;
 
@@ -610,7 +611,7 @@ out:
 	return ret;
 }
 
-long
+static long
 ext4_evfs_extent_active(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
@@ -655,7 +656,7 @@ out:
 	return err;
 }
 
-long
+static long
 ext4_evfs_extent_free(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
@@ -666,6 +667,7 @@ ext4_evfs_extent_free(struct file *filp, struct super_block *sb,
 	struct buffer_head *gdp_bh;
 	struct ext4_free_extent fex;
 	struct ext4_group_info *grp = NULL;
+	struct ext4_buddy e4b;
 	ext4_group_t group;
 	ext4_grpblk_t off_block;
 	ext4_fsblk_t block;
@@ -715,7 +717,15 @@ ext4_evfs_extent_free(struct file *filp, struct super_block *sb,
 	if (err)
 		goto out;
 
+	err = ext4_mb_load_buddy(sb, group, &e4b);
+	if (err) {
+		ext4_error(sb, "mb_load_buddy failed (%d)", err);
+		goto out;
+	}
+
 	ext4_lock_group(sb, group);
+
+	mb_free_blocks(NULL, &e4b, off_block, fex.fe_len);
 
 	mb_clear_bits(bitmap_bh->b_data, fex.fe_start, fex.fe_len);
 
@@ -727,6 +737,7 @@ ext4_evfs_extent_free(struct file *filp, struct super_block *sb,
 	ext4_group_desc_csum_set(sb, group, gdp);
 
 	ext4_unlock_group(sb, group);
+	ext4_mb_unload_buddy(&e4b);
 	percpu_counter_add(&sbi->s_freeclusters_counter, fex.fe_len);
 
 	if (sbi->s_log_groups_per_flex) {
@@ -747,14 +758,13 @@ out:
 	return err;
 }
 
-long
+static long
 ext4_evfs_extent_alloc(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
 	struct evfs_extent_alloc_op ext_op;
 	struct evfs_extent op;
 	struct ext4_allocation_context ac;
-	struct ext4_buddy e4b;
 	handle_t *handle = NULL;
 	ext4_group_t group, max_groups = ext4_get_groups_count(sb);
 	ext4_grpblk_t off_block;
@@ -810,7 +820,7 @@ out:
 
 }
 
-long
+static long
 ext4_evfs_extent_iter(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
@@ -868,7 +878,7 @@ err_next_extent:
 	return ret;
 }
 
-long
+static long
 ext4_evfs_freesp_iter(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
@@ -880,8 +890,7 @@ ext4_evfs_freesp_iter(struct file *filp, struct super_block *sb,
 	struct buffer_head *bh;
 	ext4_group_t group, max_groups = ext4_get_groups_count(sb);
 	ext4_grpblk_t off_block;
-	ext4_fsblk_t start_addr = 0;
-	int err = 0, start_marked = 0, len = 0;
+	int err = 0, start_marked = 0;
 
 	if (copy_from_user(&iter, (struct evfs_iter_ops __user *) arg,
 				sizeof(struct evfs_iter_ops)))
@@ -938,13 +947,6 @@ ext4_evfs_freesp_iter(struct file *filp, struct super_block *sb,
 				}
 			} else if (start_marked) {
 				param.length++;
-				/*
-				 * TODO (kyokeun): INT_MAX should be the maximum
-				 *                 allowed extent size. This
-				 *                 actually should not happen,
-				 *                 since max block size supported
-				 *                 by each group is INT_MAX...
-				 */
 				if (param.length == INT_MAX) {
 					start_marked = 0;
 					if (evfs_copy_param(&iter, &param,
@@ -1007,7 +1009,7 @@ ext4_evfs_extent_write(struct file *filp, struct super_block *sb, unsigned long 
 	return 0;
 }
 
-long
+static long
 ext4_evfs_sb_get(struct super_block *sb, unsigned long arg)
 {
 	struct evfs_super_block evfs_sb;
