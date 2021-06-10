@@ -1178,13 +1178,13 @@ err:
 	return ret;
 }
 
-static int ext4_mb_load_buddy(struct super_block *sb, ext4_group_t group,
+int ext4_mb_load_buddy(struct super_block *sb, ext4_group_t group,
 			      struct ext4_buddy *e4b)
 {
 	return ext4_mb_load_buddy_gfp(sb, group, e4b, GFP_NOFS);
 }
 
-static void ext4_mb_unload_buddy(struct ext4_buddy *e4b)
+void ext4_mb_unload_buddy(struct ext4_buddy *e4b)
 {
 	if (e4b->bd_bitmap_page)
 		put_page(e4b->bd_bitmap_page);
@@ -1335,7 +1335,7 @@ static void mb_buddy_mark_free(struct ext4_buddy *e4b, int first, int last)
 	}
 }
 
-static void mb_free_blocks(struct inode *inode, struct ext4_buddy *e4b,
+void mb_free_blocks(struct inode *inode, struct ext4_buddy *e4b,
 			   int first, int count)
 {
 	int left_is_free = 0;
