@@ -10,6 +10,10 @@
 #include <errno.h>
 #include <evfs.h>
 
+static int 
+atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
+                 struct evfs_timeval * mtime);
+
 int usage(char * prog)
 {
     fprintf(stderr, "usage: %s DEV [NUM]\n", prog);
@@ -39,7 +43,6 @@ int defragment(evfs_t * evfs, struct evfs_super_block * sb, long ino_nr)
     u64 poff, loff = 0;
     u64 nr_blocks;
     struct evfs_imap * imap = NULL;
-    struct evfs_timeval mtime;  // to avoid race condition
     u64 extent_size;
     u64 byte_size;
 
@@ -97,12 +100,13 @@ int defragment(evfs_t * evfs, struct evfs_super_block * sb, long ino_nr)
         byte_size = extent_size * sb->block_size; 
     }
     
-    ret = inode_map(evfs, ino_nr, imap);
-    if (ret < 0) {
+    // atomic_execute returns positive value if atomic action is cancelled 
+    // due to failed comparison
+    ret = atomic_inode_map(evfs, ino_nr, imap, &inode.mtime);
+    if (ret != 0) {
         goto fail;
     }
     
-    (void)mtime;
     free(data);
     imap_free(evfs, imap, 1 /* do not free extents on success */);
     return 0;
@@ -121,7 +125,7 @@ int defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
     
     while ((ino_nr = inode_next(it)) > 0) {
         ret = defragment(evfs, sb, ino_nr);
-        if (ret != 0) {
+        if (ret < 0) {
             break;
         }
     }
@@ -173,4 +177,40 @@ done:
 error:
     return usage(argv[0]);
 }
+
+static int 
+atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
+                 struct evfs_timeval * mtime)
+{
+    int ret, id;
+    struct evfs_atomic * aa = atomic_begin(evfs);
+    struct evfs_inode inode; 
+    
+    inode.ino_nr = ino_nr;
+    id = inode_info(aa, &inode);
+    if (id < 0) {
+        goto fail;
+    }
+    
+    ret = atomic_const_equal(aa, id, EVFS_INODE_MTIME_SEC, mtime->tv_sec);
+    if (ret < 0) {
+        goto fail;
+    }
+    
+    ret = atomic_const_equal(aa, id, EVFS_INODE_MTIME_USEC, mtime->tv_usec);
+    if (ret < 0) {
+        goto fail;
+    }
+    
+    ret = inode_map(aa, ino_nr, imap);
+    if (ret < 0) {
+        goto fail;
+    }
+    
+    ret = atomic_execute(aa);
+fail:
+    atomic_end(aa);
+    return ret;
+}
+
 

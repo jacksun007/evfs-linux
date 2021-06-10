@@ -15,9 +15,13 @@ typedef unsigned char u8;
 typedef long long i64;
 typedef int i32;
 
+// (jsun):
+// use the name evfs_t for non-atomic usage
+// use the name struct evfs_atomic for atomic usage
 
-typedef struct {
+typedef struct evfs_atomic {
     int fd;
+    int atomic;
 } evfs_t;
 
 typedef struct {
@@ -83,6 +87,12 @@ struct evfs_imap {
     struct evfs_imentry entry[];
 };
 
+enum evfs_inode_field {
+    EVFS_INODE_INVALID_FIELD = 0,
+    EVFS_INODE_MTIME_SEC,
+    EVFS_INODE_MTIME_USEC,
+};
+
 // basic open/close for evfs device
 evfs_t * evfs_open(const char * dev);
 void evfs_close(evfs_t * evfs);
@@ -111,6 +121,13 @@ struct evfs_imap * imap_new(evfs_t * evfs);
 struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr);
 int imap_append(struct evfs_imap * imap, u64 la, u64 pa, u64 len);
 void imap_free(evfs_t * evfs, struct evfs_imap * imap, int nofree);
+
+// atomic interface
+struct evfs_atomic * atomic_begin(evfs_t * evfs);
+int atomic_const_equal(struct evfs_atomic * aa, int id, int field, u64 rhs);
+int atomic_execute(struct evfs_atomic * aa);
+void atomic_end(struct evfs_atomic * aa);
+
 
 #endif
 
