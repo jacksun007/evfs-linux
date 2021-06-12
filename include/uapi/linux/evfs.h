@@ -232,34 +232,38 @@ struct evfs_iter_ops {
  *
  */
 enum evfs_opcode {
+    EVFS_INVALID_OPCODE = 0,
+
     // read operations
     EVFS_SUPER_INFO,
     EVFS_INODE_INFO,
     EVFS_DIRENT_INFO,
-    
+
     EVFS_EXTENT_READ,   // read raw data from extent
     EVFS_INODE_READ,    // same as posix read()
-    
+
     // compare operations
     // TODO: merge with Shawn's work
-    
+    EVFS_CONST_EQUAL,   // compare field with a constant
+    EVFS_FIELD_EQUAL,   // compare field with another field
+
     // write operations
     EVFS_EXTENT_ALLOC,
     EVFS_INODE_ALLOC,
-    
-    EVFS_EXTENT_WRITE,  
+
+    EVFS_EXTENT_WRITE,
     EVFS_INODE_WRITE,
-    
+
     // Note: the identifier for dirents is its filename + parent inode
     EVFS_DIRENT_ADD,
     EVFS_DIRENT_REMOVE,
     EVFS_DIRENT_UPDATE,
     EVFS_DIRENT_RENAME, // unlike update, this *keeps* content but changes id
-    
+
     // inode-specific operations
-    EVFS_INODE_MAP,    
+    EVFS_INODE_MAP,
     EVFS_INODE_UPDATE,
-    
+
     EVFS_SUPER_UPDATE,
 };
 

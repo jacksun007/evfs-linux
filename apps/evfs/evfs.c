@@ -12,15 +12,100 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <stropts.h>
+#include <linux/ioctl.h>
 #include "evfs.h"
+
+/*
+ * TODO: Probably want to define these in a separate header file, that is
+ *       not exposed to the application developer? It seems like this file
+ *       will quickly become cluttered otherwise.
+ */
+#define FS_IOC_EXTENT_ITERATE _IOR('f', 80, struct evfs_iter_ops)
+#define FS_IOC_FREESP_ITERATE _IOR('f', 81, struct evfs_iter_ops)
+#define FS_IOC_INODE_ITERATE _IOR('f', 82, struct evfs_iter_ops)
+#define FS_IOC_EVFS_ACTION _IOWR('f', 96, struct evfs_atomic_action)
+
+enum evfs_type {
+    EVFS_TYPE_INODE,
+    EVFS_TYPE_EXTENT,
+    EVFS_TYPE_SUPER,
+    EVFS_TYPE_DIRENT,
+    EVFS_TYPE_METADATA,
+};
 
 enum evfs_opcode {
     EVFS_INVALID_OPCODE = 0,
-    
-    // comparisons
+
+    // TODO: merge with Shawn's work
     EVFS_CONST_EQUAL,   // compare field with a constant
     EVFS_FIELD_EQUAL,   // compare field with another field
-    
+};
+
+struct evfs_read_op {
+    int opcode;
+
+    union {
+        struct evfs_inode inode;    /* for inode_info */
+        struct evfs_extent extent;  /* for extent-related operations */
+    };
+};
+
+struct evfs_comp_op {
+    int opcode;
+};
+
+struct evfs_write_op {
+    int opcode;
+
+    union {
+        struct evfs_inode inode;    /* for inode_update */
+    };
+};
+
+// note that for dirent operations, the parent directory is locked
+struct evfs_lockable {
+    unsigned type;
+    unsigned long object_id;
+    int exclusive;  // read or write lock?
+};
+
+typedef struct evfs_atomic_action {
+    int nr_read;
+    int nr_comp;
+
+    /* set to null if absent (e.g. read-only atomic action would not have
+       a write_op so write_op == NULL) */
+    struct evfs_read_op * read_set;
+    struct evfs_comp_op * comp_set;
+    struct evfs_write_op * write_op;    /* ONLY ONE ALLOWED */
+
+    int err;        /* error number */
+    int errop;      /* error operation (index number) */
+} atomic_action_t;
+
+/*
+ * For iterating
+ */
+struct __evfs_ext_iter_param {
+    u32 log_blkoff;
+    u32 phy_blkoff;
+    unsigned long length;
+};
+
+struct __evfs_fsp_iter_param {
+    u32 addr;
+    unsigned long length;
+};
+
+/*
+ * TODO (kyokeun): evfs_inode no longer required, since
+                   we only require the ino_nr according to
+                   new doc. (?)
+ */
+struct __evfs_ino_iter_param {
+    unsigned long ino_nr;
+    struct evfs_inode i;
 };
  
 evfs_t * evfs_open(const char * dev)
@@ -49,11 +134,24 @@ void evfs_close(evfs_t * evfs)
     }
 }
 
+/*
+ * TODO (kyokeun): Need to respect user-provided flag
+ */
 evfs_iter_t * inode_iter(evfs_t * evfs, int flags)
 {
-    (void)evfs;
-    (void)flags;
-    return NULL;
+    evfs_iter_t *iter = malloc(sizeof(evfs_iter_t));
+    iter->evfs = evfs;
+    iter->type = EVFS_TYPE_INODE;
+    iter->flags = flags;
+    iter->count = 0;
+    iter->next_req = 0;
+    
+    if (ioctl(evfs->fd, FS_IOC_INODE_ITERATE, &iter->op) < 0) {
+        free(iter);
+        return NULL;
+    }
+
+    return iter;
 }
 
 evfs_iter_t * extent_iter(evfs_t * evfs, int flags)
@@ -65,13 +163,29 @@ evfs_iter_t * extent_iter(evfs_t * evfs, int flags)
 
 u64 inode_next(evfs_iter_t * it)
 {
-    (void)it;
-    return 0;
+    struct __evfs_ino_iter_param *param;
+
+    if (it->type != EVFS_TYPE_INODE)
+        return -1;
+
+    /* If we have iterated through everything in the buffer, get more */
+    if (it->op.count < it->count) {
+        it->op.start_from = it->next_req;
+        if (ioctl(it->evfs->fd, FS_IOC_INODE_ITERATE, &it->op) <= 0)
+            return 0;
+        it->count = 0;
+    }
+
+    param = ((struct __evfs_ino_iter_param *) it->op.buffer) + it->count;
+    ++it->count;
+    it->next_req = param->ino_nr + 1;
+    
+    return param->ino_nr;
 }
 
 void iter_end(evfs_iter_t * it)
 {
-    (void)it;
+    free(it);
 }
 
 int super_info(evfs_t * evfs, struct evfs_super_block * sb)
@@ -344,7 +458,3 @@ void atomic_end(struct evfs_atomic * ea)
     
     free(aa);
 }
-
-
-
-
