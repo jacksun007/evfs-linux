@@ -13,18 +13,14 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <stropts.h>
-#include <linux/ioctl.h>
-#include "evfs.h"
+#include <evfs.h>
+#include "ioctl.h"
 
 /*
  * TODO: Probably want to define these in a separate header file, that is
  *       not exposed to the application developer? It seems like this file
  *       will quickly become cluttered otherwise.
  */
-#define FS_IOC_EXTENT_ITERATE _IOR('f', 80, struct evfs_iter_ops)
-#define FS_IOC_FREESP_ITERATE _IOR('f', 81, struct evfs_iter_ops)
-#define FS_IOC_INODE_ITERATE _IOR('f', 82, struct evfs_iter_ops)
-#define FS_IOC_EVFS_ACTION _IOWR('f', 96, struct evfs_atomic_action)
 
 enum evfs_type {
     EVFS_TYPE_INODE,
