@@ -274,30 +274,35 @@ ext4_evfs_inode_get(struct file *filp, struct super_block *sb,
 		return PTR_ERR(vfs_inode);
 	}
 
-	i.uid = i_uid_read(vfs_inode);
-	i.gid = i_gid_read(vfs_inode);
-	i.mode = cpu_to_le16(vfs_inode->i_mode);
-	i.flags = cpu_to_le32(vfs_inode->i_flags);
-
-	ext4_evfs_copy_timespec(&(i.atime), &(vfs_inode->i_atime));
-	ext4_evfs_copy_timespec(&(i.ctime), &(vfs_inode->i_ctime));
-	ext4_evfs_copy_timespec(&(i.mtime), &(vfs_inode->i_mtime));
-
-	ext4_msg(sb, KERN_ERR,
-			"no : %ld\n"
-		 	"mode : %d\n"
-			"uid : %d\n"
-			"gid : %d\n"
-			"refcount : %d\n",
-		vfs_inode->i_ino,
-		vfs_inode->i_mode,
-		vfs_inode->i_uid.val,
-		vfs_inode->i_gid.val,
-		atomic_read(&vfs_inode->i_count));
+	vfs_to_evfs_inode(vfs_inode, &i);
 
 	iput(vfs_inode);
 	if (copy_to_user((struct evfs_inode __user *) arg, &i, sizeof(i)))
 		return -EFAULT;
+	return 0;
+}
+
+static long
+ext4_evfs_inode_set(struct file *filp, struct super_block *sb,
+					unsigned long arg)
+{
+	struct inode *inode;
+	struct evfs_inode evfs_i;
+
+	if (copy_from_user(&evfs_i, (struct evfs_inode __user *) arg, sizeof(evfs_i)))
+		return -EFAULT;
+
+	inode = ext4_iget_normal(sb, evfs_i.ino_nr);
+	if (IS_ERR(inode)) {
+		ext4_msg(sb, KERN_ERR, "Inode %lu not found", evfs_i.ino_nr);
+		return PTR_ERR(inode);
+	}
+
+	evfs_to_vfs_inode(&evfs_i, inode);
+	write_inode_now(inode, 1);
+	// mark_inode_dirty(inode);
+	iput(inode);
+
 	return 0;
 }
 
@@ -551,12 +556,6 @@ ext4_evfs_inode_iter(struct file *filp, struct super_block *sb,
 			continue;
 		}
 		bh = sb_getblk(sb, ext4_inode_bitmap(sb, gdp));
-		/*
-		 * TODO (kyokeun): There's some edge cases that I am not taking
-		 *                 in consideration of (i.e., concurrency could
-		 *                 be a problem since we don't hold onto the bitmap)
-		 *                 It seems to work fine for basic cases.
-		 */
 		lock_buffer(bh);
 		if (!buffer_uptodate(bh)) {
 			ext4_msg(sb, KERN_ERR, "group %d buffer not up to date!", group);
@@ -585,10 +584,6 @@ ext4_evfs_inode_iter(struct file *filp, struct super_block *sb,
 				inode = ext4_iget(sb, ino_nr);
 				if (!inode || IS_ERR(inode) || inode->i_state & I_CLEAR)
 					continue;
-				if (!S_ISREG(inode->i_mode)) {
-					iput(inode);
-					continue;
-				}
 				param.ino_nr = ino_nr;
 				vfs_to_evfs_inode(inode, &param.i);
 				iput(inode);
@@ -1027,6 +1022,27 @@ ext4_evfs_sb_get(struct super_block *sb, unsigned long arg)
 
 }
 
+static long
+ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
+{
+	long err = -1;
+
+	switch (op->code) {
+		case EVFS_INODE_INFO:
+			break;
+		case EVFS_INODE_UPDATE:
+			err = ext4_evfs_inode_set;
+			break;
+		default:
+			panic("not implemented. should not get here\n");
+	}
+	return err;
+}
+
+struct evfs_atomic_op ext4_evfs_atomic_ops = {
+	.execute = ext4_evfs_execute,
+};
+
 long
 ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
@@ -1036,6 +1052,8 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	long err;
 
 	switch (cmd) {
+	case FS_IOC_ATOMIC_ACTION:
+		return evfs_run_atomic_action(sb, &ext4_evfs_atomic_ops, arg);
 	case FS_IOC_INODE_LOCK:
 		if (get_user(ino_nr, (unsigned long __user *) arg))
 			return -EFAULT;
@@ -1074,6 +1092,8 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return ext4_evfs_extent_write(filp, sb, arg);
 	case FS_IOC_INODE_GET:
 		return ext4_evfs_inode_get(filp, sb, arg);
+	case FS_IOC_INODE_SET:
+		return ext4_evfs_inode_set(filp, sb, arg);
 	case FS_IOC_INODE_READ:
 		return ext4_evfs_inode_read(filp, sb, arg);
 	case FS_IOC_INODE_MAP:
