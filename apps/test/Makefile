@@ -3,13 +3,14 @@
 #
 
 CC=gcc
-CFLAGS=-Wall -Wextra -Werror -O2 -I./include
-PROG=libevfs.a
+CFLAGS=-Wall -Wextra -Werror -I../evfs/include -L../evfs
+LOADLIBES=-levfs
+PROG=test
 
 all: depend $(PROG)
 
-$(PROG): evfs.o atomic.o
-	$(AR) rcs $@ $^
+$(PROG): test.o ../evfs/libevfs.a
+	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
 	
 .PHONY: clean
 clean:

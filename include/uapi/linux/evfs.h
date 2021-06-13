@@ -6,6 +6,7 @@
 #include <linux/types.h>
 
 enum evfs_type {
+    EVFS_TYPE_INVALID,
     EVFS_TYPE_INODE,
     EVFS_TYPE_EXTENT,
     EVFS_TYPE_SUPER,
@@ -48,7 +49,6 @@ struct evfs_inode_property {
     int inlined;        // does inode have inlined data
     int refcount;       // link count
     long blockcount;    // number of blocks used
-    long bytesize;      // size of inode, in bytes
 };
 
 /* TODO: replace with kernel's timespec? */
@@ -69,6 +69,7 @@ struct evfs_inode {
     int /* kgid_t */ gid;
     unsigned short /* umode_t */ mode;
     unsigned int flags;
+    unsigned long bytesize;      // size of inode, in bytes
 
     union {
         const struct evfs_inode_property prop;  /* users read this */
@@ -232,22 +233,35 @@ struct evfs_iter_ops {
  *
  */
 enum evfs_opcode {
-    EVFS_INVALID_OPCODE = 0,
+    EVFS_OPCODE_INVALID = 0,
 
+    // compare operations
+    EVFS_COMP_OP_BEGIN,
+    
+    EVFS_CONST_EQUAL = EVFS_COMP_OP_BEGIN, // compare field with a constant
+    EVFS_FIELD_EQUAL,                      // compare field with another field
+    
+    EVFS_COMP_OP_END,
+    
     // read operations
+    EVFS_READ_OP_BEGIN = EVFS_COMP_OP_END,
+ 
+    EVFS_INODE_INFO = EVFS_READ_OP_BEGIN,
     EVFS_SUPER_INFO,
-    EVFS_INODE_INFO,
     EVFS_DIRENT_INFO,
 
     EVFS_EXTENT_READ,   // read raw data from extent
     EVFS_INODE_READ,    // same as posix read()
 
-    // compare operations
-    // TODO: merge with Shawn's work
-    EVFS_CONST_EQUAL,   // compare field with a constant
-    EVFS_FIELD_EQUAL,   // compare field with another field
+    EVFS_READ_OP_END,
 
     // write operations
+    EVFS_WRITE_OP_BEGIN = EVFS_READ_OP_END,
+    
+    EVFS_INODE_UPDATE = EVFS_WRITE_OP_BEGIN,
+    EVFS_SUPER_UPDATE,
+    EVFS_DIRENT_UPDATE,
+    
     EVFS_EXTENT_ALLOC,
     EVFS_INODE_ALLOC,
 
@@ -257,56 +271,56 @@ enum evfs_opcode {
     // Note: the identifier for dirents is its filename + parent inode
     EVFS_DIRENT_ADD,
     EVFS_DIRENT_REMOVE,
-    EVFS_DIRENT_UPDATE,
     EVFS_DIRENT_RENAME, // unlike update, this *keeps* content but changes id
 
     // inode-specific operations
     EVFS_INODE_MAP,
-    EVFS_INODE_UPDATE,
 
-    EVFS_SUPER_UPDATE,
-};
-
-struct evfs_read_op {
-    int opcode;
-    
-    union {
-        struct evfs_inode inode;    /* for inode_info */
-        struct evfs_extent extent;  /* for extent-related operations */
-    };
-};
-
-struct evfs_comp_op {
-    int opcode;  
-};
-
-struct evfs_write_op {
-    int opcode;
-    
-    union {
-        struct evfs_inode inode;    /* for inode_update */
-    };
+    EVFS_WRITE_OP_END,
 };
 
 // note that for dirent operations, the parent directory is locked
 struct evfs_lockable {
     unsigned type;
-    unsigned long object_id;
     int exclusive;  // read or write lock?
+    unsigned long object_id;
+};
+
+struct evfs_opentry {
+    int code;
+    int id;
+    void * data;
+};
+
+struct evfs_atomic_action_param {
+    /* userspace skips 'header' when passing struct to kernel */
+    int count;
+    int capacity;
+    int errop;
+    struct evfs_opentry item[];
 };
 
 struct evfs_atomic_action {
     int nr_read;
     int nr_comp;
     
+    /* used by fs to execute the atomic action */
+    struct super_block * sb;
+    
     /* set to null if absent (e.g. read-only atomic action would not have
        a write_op so write_op == NULL) */
-    struct evfs_read_op * read_set;
-    struct evfs_comp_op * comp_set;
-    struct evfs_write_op * write_op;    /* ONLY ONE ALLOWED */
+    struct evfs_opentry ** read_set;
+    struct evfs_opentry ** comp_set;    
+    struct evfs_opentry * write_op;    /* ONLY ONE ALLOWED */
     
-    int err;        /* error number */
-    int errop;      /* error operation (index number) */
+    /* data copied from userspace */
+    struct evfs_atomic_action_param param;
+};
+
+struct evfs_atomic_op {
+    long (* lock)(struct evfs_atomic_action * aa, struct evfs_lockable * lkb);
+    void (* unlock)(struct evfs_atomic_action * aa, struct evfs_lockable * lkb);
+    long (* execute)(struct evfs_atomic_action * aa, struct evfs_opentry * op);
 };
 
 /*
@@ -346,11 +360,11 @@ struct evfs_atomic_action {
 #define FS_IOC_SUPER_SET _IOWR('f', 84, struct evfs_super_block)
 #define FS_IOC_META_MOVE _IOR('f', 85, struct evfs_meta_mv_ops)
 #define FS_IOC_META_ITER _IOR('f', 86, struct evfs_iter_ops)
-#define FS_IOC_EVFS_ACTION _IOWR('f', 96, struct evfs_atomic_action)
+#define FS_IOC_ATOMIC_ACTION _IOWR('f', 96, struct evfs_atomic_action_param)
 
 // fs/evfs.c
-void evfs_destroy_atomic_action(struct evfs_atomic_action * aa);
-long evfs_get_user_atomic_action(struct evfs_atomic_action * aout, void * arg);
+long evfs_run_atomic_action(struct super_block * sb, struct evfs_atomic_op *fop,
+                           void * arg);
 
 #endif /* _UAPI_LINUX_EVFS_H */
 

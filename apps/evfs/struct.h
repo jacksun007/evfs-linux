@@ -3,13 +3,8 @@
 
 #include <evfs.h>
 
-/*
- * TODO: Probably want to define these in a separate header file, that is
- *       not exposed to the application developer? It seems like this file
- *       will quickly become cluttered otherwise.
- */
-
 enum evfs_type {
+    EVFS_TYPE_INVALID,
     EVFS_TYPE_INODE,
     EVFS_TYPE_EXTENT,
     EVFS_TYPE_SUPER,
@@ -17,55 +12,37 @@ enum evfs_type {
     EVFS_TYPE_METADATA,
 };
 
-enum evfs_opcode {
-    EVFS_INVALID_OPCODE = 0,
+#define EVFS_BUFSIZE (1024 * sizeof(char))
 
-    // TODO: merge with Shawn's work
-    EVFS_CONST_EQUAL,   // compare field with a constant
-    EVFS_FIELD_EQUAL,   // compare field with another field
+/*
+ * Struct to pass into the ioctl call for all iterate calls.
+ * buffer will be used to hold <count> many parameters.
+ *
+ * Note that start_from represents different things for different
+ * iterate calls:
+ *     - Extent iterate: logical block offset
+ *     - Freesp iterate: physical block offset
+ *     - Inode iterate: inode number
+ *
+ * Furthermore, iterate calls should return:
+ *     - 1, if there are more items left
+ *     - 0, if there are no more items to iterate
+ */
+struct evfs_iter_ops {
+    char buffer[EVFS_BUFSIZE];
+    unsigned long count; /* Number of parameters that resides in the buffer */
+    unsigned long start_from;
+    unsigned long ino_nr; /* Used for extent iter, ignored by rest */
 };
 
-struct evfs_read_op {
-    int opcode;
-
-    union {
-        struct evfs_inode inode;    /* for inode_info */
-        struct evfs_extent extent;  /* for extent-related operations */
-    };
-};
-
-struct evfs_comp_op {
-    int opcode;
-};
-
-struct evfs_write_op {
-    int opcode;
-
-    union {
-        struct evfs_inode inode;    /* for inode_update */
-    };
-};
-
-// note that for dirent operations, the parent directory is locked
-struct evfs_lockable {
-    unsigned type;
-    unsigned long object_id;
-    int exclusive;  // read or write lock?
-};
-
-typedef struct evfs_atomic_action {
-    int nr_read;
-    int nr_comp;
-
-    /* set to null if absent (e.g. read-only atomic action would not have
-       a write_op so write_op == NULL) */
-    struct evfs_read_op * read_set;
-    struct evfs_comp_op * comp_set;
-    struct evfs_write_op * write_op;    /* ONLY ONE ALLOWED */
-
-    int err;        /* error number */
-    int errop;      /* error operation (index number) */
-} atomic_action_t;
+typedef struct evfs_iter_s {
+    evfs_t * evfs;
+    int type;
+    int flags;
+    u64 count;
+    u64 next_req;
+    struct evfs_iter_ops op;
+} evfs_iter_t;
 
 /*
  * For iterating
@@ -92,3 +69,4 @@ struct __evfs_ino_iter_param {
 };
 
 #endif // STRUCT_H_
+

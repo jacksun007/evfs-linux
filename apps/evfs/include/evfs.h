@@ -19,47 +19,17 @@ typedef int i32;
 // use the name evfs_t for non-atomic usage
 // use the name struct evfs_atomic for atomic usage
 
-typedef struct evfs_atomic {
-    int fd;
-    int atomic;
-} evfs_t;
+struct evfs_atomic;
+typedef struct evfs_atomic evfs_t;
 
 struct evfs_extent {
     u64 addr;   // block address
     u64 len;    // number of blocks
 };
 
-#define EVFS_BUFSIZE (1024 * sizeof(char))
-
-/*
- * Struct to pass into the ioctl call for all iterate calls.
- * buffer will be used to hold <count> many parameters.
- *
- * Note that start_from represents different things for different
- * iterate calls:
- *     - Extent iterate: logical block offset
- *     - Freesp iterate: physical block offset
- *     - Inode iterate: inode number
- *
- * Furthermore, iterate calls should return:
- *     - 1, if there are more items left
- *     - 0, if there are no more items to iterate
- */
-struct evfs_iter_ops {
-    char buffer[EVFS_BUFSIZE];
-    unsigned long count; /* Number of parameters that resides in the buffer */
-    unsigned long start_from;
-    unsigned long ino_nr; /* Used for extent iter, ignored by rest */
-};
-
-typedef struct {
-    evfs_t * evfs;
-    int type;
-    int flags;
-    u64 count;
-    u64 next_req;
-    struct evfs_iter_ops op;
-} evfs_iter_t;
+// generic iterator type (opaque to user)
+struct evfs_iter_s;
+typedef struct evfs_iter_s evfs_iter_t;
 
 struct evfs_super_block {
     u64 max_extent_size;  /* maximum allowed size of a given extent */
@@ -114,10 +84,18 @@ struct evfs_imap {
     struct evfs_imentry entry[];
 };
 
-enum evfs_inode_field {
-    EVFS_INODE_INVALID_FIELD = 0,
-    EVFS_INODE_MTIME_SEC,
+// TODO: put ALL the possible comparable fields here
+enum evfs_field {
+    EVFS_FIELD_INVALID = 0,
+    
+    EVFS_INODE_FIELD_BEGIN,
+    
+    EVFS_INODE_MTIME_SEC = EVFS_INODE_FIELD_BEGIN,
     EVFS_INODE_MTIME_USEC,
+    
+    EVFS_INODE_FIELD_END,
+
+    // TODO: add fields of other objects    
 };
 
 // basic open/close for evfs device
@@ -140,6 +118,7 @@ int super_info(evfs_t * evfs, struct evfs_super_block * sb);
 
 // inode
 int inode_info(evfs_t * evfs, struct evfs_inode * inode);
+int inode_update(evfs_t * evfs, struct evfs_inode * inode);
 int inode_map(evfs_t * evfs, u64 ino_nr, struct evfs_imap * imap);
 int inode_read(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len);
 

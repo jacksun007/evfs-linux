@@ -9,8 +9,8 @@ PROG=defrag
 
 all: depend $(PROG)
 
-$(PROG): defrag.o
-	$(CC) $(CFLAGS) -o $@ $^ $(LOADLIBES)
+$(PROG): defrag.o ../evfs/libevfs.a
+	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
 	
 .PHONY: clean
 clean:

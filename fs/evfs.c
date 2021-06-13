@@ -333,69 +333,317 @@ evfs_copy_param(struct evfs_iter_ops *iter, const void *param, int size)
 	return 0;
 }
 
-static
-long
-evfs_get_user_write_op(struct evfs_write_op ** woptr, void * arg)
-{
-    const size_t MSIZE = sizeof(struct evfs_write_op);
-    struct evfs_write_op * wop = NULL;
-    long err;
-    
-    if (arg == NULL)
-        goto done;
-    
-    wop = kmalloc(MSIZE, GFP_KERNEL | GFP_NOFS);
-    if (wop == NULL) {
-        err = -ENOMEM;
-        goto fail;
-    }
-    
-    if (copy_from_user(wop, (struct evfs_write_op __user *) arg,
-				sizeof(struct evfs_write_op))) {
-		err = -EFAULT;
-	    goto fail;
-	}
-
-done:
-    *woptr = wop;
-    return 0;
-    
-fail:
-    kfree(wop);
-    *woptr = NULL;
-    return err;
-}
+//
+// evfs atomic action implementation
+// 
 
 void 
 evfs_destroy_atomic_action(struct evfs_atomic_action * aa)
 {
-    // TODO: this may need to be updated if write_op contains dynamically
-    //       allocated memory
-    if (aa->write_op)
-        kfree(aa->write_op);
+    if (aa) {
+        kfree(aa->read_set);
+        kfree(aa->comp_set);
+        kfree(aa);
+    }
 }
 
+#define _IS_EVFS_OP(v, t) \
+    ((v) >= EVFS_ ## t ## _OP_BEGIN && (v) < EVFS_ ## t ## _OP_END)
+#define IS_EVFS_READ_OP(v) _IS_EVFS_OP(v, READ)
+#define IS_EVFS_COMP_OP(v) _IS_EVFS_OP(v, COMP)   
+#define IS_EVFS_WRITE_OP(v) _IS_EVFS_OP(v, WRITE) 
 
+static 
 long
-evfs_get_user_atomic_action(struct evfs_atomic_action * aout, void * arg)
+evfs_new_atomic_action(struct evfs_atomic_action ** aap, 
+                       struct super_block * sb, void * arg)
 {
+    struct evfs_atomic_action_param param;
+    struct evfs_atomic_action * aa;
+    unsigned long ret;
     long err;
+    int i, r, c;
+        
+    /* copy the header */
+    ret = copy_from_user(&param, (struct evfs_atomic_action_param __user *)arg,
+                         sizeof(struct evfs_atomic_action_param));
+    if (ret != 0) {
+        return -EFAULT;
+    }
     
-    if (copy_from_user(aout, (struct evfs_atomic_action __user *) arg,
-				sizeof(struct evfs_atomic_action)))
-	    return -EFAULT;
-
-	// TODO: support read and comp operations later
-	aout->read_set = NULL;
-	aout->comp_set = NULL;
-
-	err = evfs_get_user_write_op(&aout->write_op, aout->write_op);
-	if (err)
-	    return err;
-	
-	aout->err = 0;
-    aout->errop = 0;
+    /* allocate entire structure */
+    aa = kmalloc(sizeof(struct evfs_atomic_action) + 
+                 param.count*sizeof(struct evfs_opentry), GFP_KERNEL | GFP_NOFS);
+    if (!aa) {
+        return -ENOMEM;
+    }
     
+    /* copy the flexible array */
+    aa->param = param;
+    ret = copy_from_user((char *)&aa->param + sizeof(param), 
+                         (char *)arg + sizeof(param),
+                         param.count*sizeof(struct evfs_opentry));
+    if (ret != 0) {
+        err = -EFAULT;
+        goto fail;
+    }
+    
+    /* initialize rest of struct */
+    aa->sb = sb;
+    aa->nr_read = 0;
+    aa->nr_comp = 0;
+    aa->write_op = NULL;
+    aa->read_set = NULL;
+    aa->comp_set = NULL;
+    
+    /* count number of comp/read ops */
+    for (i = 0; i < param.count; i++) {
+        struct evfs_opentry * entry = &aa->param.item[i];
+        if (IS_EVFS_READ_OP(entry->code)) {
+            aa->nr_read += 1;
+        }
+        else if (IS_EVFS_COMP_OP(entry->code)) {
+            aa->nr_comp += 1;
+        }
+        else {
+            BUG_ON(!IS_EVFS_WRITE_OP(entry->code));
+            
+            if (aa->write_op != NULL) {
+                err = -EINVAL;
+                goto fail;
+            }
+            
+            aa->write_op = entry;
+        }
+    }
+    
+    /* allocate for read and comp set */
+    if (aa->nr_read > 0) {
+        aa->read_set = kmalloc(sizeof(struct evfs_opentry *)*aa->nr_read, 
+                               GFP_KERNEL | GFP_NOFS);
+        if (!aa->read_set) {
+            ret = -ENOMEM;
+            goto fail;
+        }
+    }
+    
+    if (aa->nr_comp > 0) {   
+        aa->comp_set = kmalloc(sizeof(struct evfs_opentry *)*aa->nr_comp, 
+                               GFP_KERNEL | GFP_NOFS);
+        if (!aa->comp_set) {
+            kfree(aa->read_set);
+            ret = -ENOMEM;
+            goto fail;
+        }
+    }
+    
+    /* set up read and comp set */
+    for (i = 0, r = 0, c = 0; i < param.count; i++) {
+        struct evfs_opentry * entry = &aa->param.item[i];
+        if (IS_EVFS_READ_OP(entry->code)) {
+            aa->read_set[r++] = entry;
+        }
+        else if (IS_EVFS_COMP_OP(entry->code)) {
+            aa->comp_set[c++] = entry;
+        }
+    }
+    
+    aa->param.errop = 0;
+    *aap = aa;
+    return 0;
+fail:
+    kfree(aa);
+    return err;
+}
+
+#define INVALIDATE_LOCKABLE(l) do { \
+    (l)->type = EVFS_TYPE_INVALID; \
+    (l)->object_id = 0; \
+    (l)->exclusive = 0; \
+} while(0)
+
+static
+void
+evfs_add_lockable(struct evfs_lockable * lk, int type, unsigned long id, int ex)
+{
+    struct evfs_lockable * lkb = lk;
+    
+    while (lkb->type != EVFS_TYPE_INVALID) {
+        
+        /* we found a duplicate entry */
+        if (lkb->type == type && lkb->object_id == id) {
+            
+            /* if not already exclusive, set it to exclusive */
+            if (ex) {
+                lkb->exclusive = 1;
+            }
+        
+            return;
+        }
+    
+        lkb++;
+    }
+    
+    /* cannot find duplicate entry, add it to the end */
+    lkb->type = type;
+    lkb->object_id = id;
+    lkb->exclusive = ex;
+    
+    /* invalidate last entry */
+    lkb++;
+    INVALIDATE_LOCKABLE(lkb);
+}
+
+static
+long
+evfs_add_inode_lockable(struct evfs_lockable * lk, int ex, void * arg)
+{
+    unsigned long ino_nr;
+    long ret = copy_from_user(&ino_nr, (unsigned long __user *)arg, 
+                         sizeof(unsigned long));
+    if (ret != 0) {
+        return -EFAULT;
+    }
+    
+    evfs_add_lockable(lk, EVFS_TYPE_INODE, ino_nr, ex);
     return 0;
 }
+
+static
+long
+evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
+{
+    int max_lockable = aa->nr_read + 2;
+    int i;
+    long ret;
+    
+    struct evfs_lockable * lockable = kmalloc(
+        max_lockable * sizeof(struct evfs_lockable), GFP_KERNEL | GFP_NOFS);
+    
+    if (!lockable) {
+        return -ENOMEM;
+    }
+    
+    /* last entry of the array is always invalid */
+    INVALIDATE_LOCKABLE(&lockable[0]);
+
+    for (i = 0; i < aa->param.count; i++) {
+        struct evfs_opentry * entry = &aa->param.item[i];
+        
+        if (IS_EVFS_COMP_OP(entry->code)) {
+            continue;
+        }
+        
+        /* update as we support more evfs operations */
+        switch (entry->code) {
+            case EVFS_INODE_INFO:
+                ret = evfs_add_inode_lockable(lockable, 0, entry->data);
+                break;
+            case EVFS_INODE_UPDATE:
+                ret = evfs_add_inode_lockable(lockable, 1, entry->data);
+                break;
+            default:
+                ret = -EINVAL;
+        }
+        
+        if (ret < 0) {
+            goto fail;
+        }
+    }
+    
+    *lp = lockable;
+    return 0;
+fail:
+    kfree(lockable);
+    return ret;
+}
+
+static
+long
+evfs_execute_compare(struct evfs_atomic_action * aa, struct evfs_opentry * op)
+{
+    // TODO: merge with refactored code
+    (void)aa;
+    (void)op;
+    return 0;
+}
+
+long
+evfs_run_atomic_action(struct super_block * sb, 
+                       struct evfs_atomic_op *fop,
+                       void * arg)
+{
+    struct evfs_atomic_action * aa;
+    struct evfs_lockable * lk, * lkb;
+    long ret;
+    unsigned i, j, k;
+    
+    /* set up atomic action */
+    ret = evfs_new_atomic_action(&aa, sb, arg);
+    if (ret < 0) {
+        return ret;
+    }
+    
+    ret = evfs_new_lock_set(aa, &lk);
+    if (ret < 0) {
+        goto fail;
+    }
+    
+    /* lock everything */
+    i = 0; lkb = lk;
+    while (lkb->type != EVFS_TYPE_INVALID) {
+        ret = fop->lock(aa, lkb);
+        if (ret < 0) {
+            goto unlock;
+        }
+        
+        i++; lkb++;
+    }
+    
+    // run read set first 
+    for (k = 0; k < aa->nr_read; k++) {
+        ret = fop->execute(aa, aa->read_set[k]);
+        if (ret < 0) {
+            aa->param.errop = aa->read_set[k]->id;
+            goto unlock;
+        }
+    }
+    
+    for (k = 0; k < aa->nr_comp; k++) {
+        ret = evfs_execute_compare(aa, aa->comp_set[k]);
+        if (ret < 0) {
+            aa->param.errop = aa->comp_set[k]->id;
+            goto unlock;
+        }
+    }
+    
+    // run write op last 
+    if (aa->write_op) {
+        ret = fop->execute(aa, aa->write_op);
+        if (ret < 0) {
+            aa->param.errop = aa->write_op->id;
+            goto unlock;
+        }
+    }
+    
+    /* success */
+    ret = 0;
+    
+unlock:
+    /* have to be careful here because we may unlock due to failure.
+       should only unlock as many as the ones successfully locked.   */
+    j = 0; lkb = lk;
+    while (lkb->type != EVFS_TYPE_INVALID && j < i) {
+        fop->unlock(aa, lkb);
+        lkb++;
+    } 
+    
+fail:
+    /* assume success otherwise we are screwed anyways */
+    copy_to_user((struct evfs_atomic_action_param __user *) arg, 
+                 &aa->param, sizeof(struct evfs_atomic_action_param));
+    evfs_destroy_atomic_action(aa);
+    return ret;
+}
+
 

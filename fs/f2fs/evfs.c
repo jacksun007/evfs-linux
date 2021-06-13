@@ -1009,14 +1009,16 @@ f2fs_evfs_inode_read(struct file *filp, struct super_block *sb, unsigned long ar
 	return 0;
 }
 
+static
 long
-f2fs_evfs_inode_get(struct file *filp, struct super_block *sb, unsigned long arg)
+f2fs_evfs_inode_info(struct super_block *sb, void __user * arg)
 {
+    unsigned long ino_nr;
 	struct evfs_inode evfs_i;
 	struct inode *inode;
 
 	/* Get evfs_inode struct from user */
-	if (copy_from_user(&evfs_i, (long __user *) arg, sizeof(struct evfs_inode))) {
+	if (copy_from_user(&evfs_i, arg, sizeof(unsigned long))) {
 		f2fs_msg(sb, KERN_ERR, "failed to retrieve argument");
 		return -EFAULT;
 	}
@@ -1028,6 +1030,7 @@ f2fs_evfs_inode_get(struct file *filp, struct super_block *sb, unsigned long arg
 		return PTR_ERR(inode);
 	}
 
+    evfs_i.ino_nr = ino_nr;
 	vfs_to_evfs_inode(inode, &evfs_i);
 	evfs_i._prop.inlined = f2fs_has_inline_data(inode);
 
@@ -1069,13 +1072,13 @@ f2fs_evfs_inode_update(struct super_block *sb, struct evfs_inode * evfs_inode)
 	return 0;
 }
 
+static
 long
-f2fs_evfs_inode_set(struct file *filp, struct super_block *sb, unsigned long arg)
+f2fs_evfs_inode_set(struct super_block *sb, void __user * arg)
 {
 	struct evfs_inode evfs_i;
 
-	if (copy_from_user(&evfs_i, (struct evfs_inode __user *) arg,
-				sizeof(struct evfs_inode)))
+	if (copy_from_user(&evfs_i, arg, sizeof(struct evfs_inode)))
 		return -EFAULT;
 
 	return f2fs_evfs_inode_update(sb, &evfs_i);
@@ -1374,122 +1377,70 @@ f2fs_evfs_inode_unlock(struct super_block * sb, struct evfs_lockable * lkb)
     iput(inode);
 }
 
-static long f2fs_evfs_lock_all(struct super_block * sb, 
-                               struct evfs_lockable * lockables,
-                               int nr_lockable)
+static 
+long 
+f2fs_evfs_lock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable)
 {
     long err = 0;
-    int i;
 
-    for (i = 0; i < nr_lockable; i++) {
-        switch (lockables[i].type) {
-        case EVFS_TYPE_INODE:
-            err = f2fs_evfs_inode_lock(sb, &lockables[i]);
-            break;
-        default:
-            panic("not implemented. should not get here\n");
-        }
-        
-        if (err < 0) {
-            break;
-        }
+    switch (lockable->type) {
+    case EVFS_TYPE_INODE:
+        err = f2fs_evfs_inode_lock(aa->sb, lockable);
+    default:
+        panic("not implemented. should not get here\n");
     }
     
     return err;
 }
 
-static void f2fs_evfs_unlock_all(struct super_block * sb, 
-                                 struct evfs_lockable * lockables,
-                                 int nr_lockable)
+static 
+void 
+f2fs_evfs_unlock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable)
 {
-    int i;
-
-    for (i = 0; i < nr_lockable; i++) {
-        switch (lockables[i].type) {
-        case EVFS_TYPE_INODE:
-            f2fs_evfs_inode_unlock(sb, &lockables[i]);
-            break;
-        default:
-            panic("not implemented. should not get here\n");
-        }
+    switch (lockable->type) {
+    case EVFS_TYPE_INODE:
+        f2fs_evfs_inode_unlock(aa->sb, lockable);
+        break;
+    default:
+        panic("not implemented. should not get here\n");
     }
 }
 
 static
 long
-f2fs_evfs_atomic_action(struct super_block * sb, struct evfs_atomic_action * aa)
+f2fs_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 {
-    long err = 0;
+    long err;
 
-    // TODO: move into a generic evfs function
-    int max_lockable = aa->nr_read + 1;
-    int nr_lockable = 0;
-    int lsize = max_lockable * sizeof(struct evfs_lockable);
-    struct evfs_lockable * lockables = kmalloc(lsize, GFP_KERNEL | GFP_NOFS);
-    
-    if (!lockables) {
-        return -ENOMEM;
-    }
-
-    if (aa->write_op) {
-        switch (aa->write_op->opcode) {
-        case EVFS_INODE_MAP:
-        case EVFS_INODE_UPDATE:
-            lockables[0].type = EVFS_TYPE_INODE;
-            lockables[0].object_id = aa->write_op->inode.ino_nr;
-            lockables[0].exclusive = 1;
-            break;
-        default:
-            err = -EINVAL;
-            goto fail;
-        }
-        
-        nr_lockable++;
+    switch (op->code) {
+    case EVFS_INODE_INFO:
+        err = f2fs_evfs_inode_info(aa->sb, op->data);
+        break;
+    case EVFS_INODE_UPDATE:
+        err = f2fs_evfs_inode_set(aa->sb, op->data);
+        break;
+    default:
+        panic("not implemented. should not get here\n");
     }
     
-    err = f2fs_evfs_lock_all(sb, lockables, nr_lockable);
-    if (err < 0)
-        goto fail;
-    
-    // TODO: perform read/comp operations
-    
-    // perform write operation
-    if (aa->write_op) {
-        switch (aa->write_op->opcode) {
-        case EVFS_INODE_MAP:
-        case EVFS_INODE_UPDATE:
-            err = f2fs_evfs_inode_update(sb, &aa->write_op->inode);
-            break;
-        default:
-            panic("this shouldn't be possible...");
-        }
-    }
-    
-    // unlock
-    f2fs_evfs_unlock_all(sb, lockables, nr_lockable);
-
-fail:
-    kfree(lockables);
-    (void)sb;
     return err;
 }
+
+struct evfs_atomic_op f2fs_evfs_atomic_ops = {
+    .lock = f2fs_evfs_lock,
+    .unlock = f2fs_evfs_unlock,
+    .execute = f2fs_evfs_execute,
+};
 
 long
 f2fs_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
 	struct super_block *sb = inode->i_sb;
-	struct evfs_atomic_action aa;
-	long err = 0;
 
 	switch(cmd) {
-	case FS_IOC_EVFS_ACTION:    
-	    err = evfs_get_user_atomic_action(&aa, (void *) arg);
-	    if (err < 0)
-	        return err;
-	    err = f2fs_evfs_atomic_action(sb, &aa);
-	    evfs_destroy_atomic_action(&aa);
-	    return err;
+	case FS_IOC_ATOMIC_ACTION:   
+	    return evfs_run_atomic_action(sb, &f2fs_evfs_atomic_ops, (void *)arg);
 	case FS_IOC_EXTENT_ALLOC:
 		return f2fs_evfs_extent_alloc(filp, sb, arg);
 	case FS_IOC_EXTENT_ACTIVE:
@@ -1509,9 +1460,9 @@ f2fs_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case FS_IOC_INODE_STAT:
 		return f2fs_evfs_inode_stat(sb, arg);
 	case FS_IOC_INODE_GET:
-		return f2fs_evfs_inode_get(filp, sb, arg);
+		return f2fs_evfs_inode_info(sb, (void *)arg);
 	case FS_IOC_INODE_SET:
-		return f2fs_evfs_inode_set(filp, sb, arg);
+		return f2fs_evfs_inode_set(sb, (void *)arg);
 	case FS_IOC_INODE_READ:
 		return f2fs_evfs_inode_read(filp, sb, arg);
 	case FS_IOC_INODE_MAP:
