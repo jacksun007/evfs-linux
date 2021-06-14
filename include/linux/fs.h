@@ -2941,8 +2941,6 @@ static inline void evfs_timespec_to_timeval(struct timespec *in,
 static inline void
 vfs_to_evfs_inode(struct inode *inode, struct evfs_inode *evfs_i)
 {
-	unsigned int blockcnt, blksize;
-
 	evfs_i->ino_nr = inode->i_ino;
 	evfs_i->mode = inode->i_mode;
 	evfs_i->flags = inode->i_flags;
@@ -2952,13 +2950,7 @@ vfs_to_evfs_inode(struct inode *inode, struct evfs_inode *evfs_i)
 	evfs_i->gid = i_gid_read(inode);
 	evfs_i->uid = i_uid_read(inode);
 	evfs_i->bytesize = i_size_read(inode);
-	
-	/* TODO: this is not correct */
-	blockcnt = evfs_i->bytesize >> PAGE_SHIFT;
-	blksize = 1 << inode->i_blkbits;
-	evfs_i->_prop.blockcount = blockcnt + (blockcnt << blksize <
-					evfs_i->bytesize << blksize);
-					
+	evfs_i->_prop.blockcount = inode->i_blocks;
 	evfs_i->_prop.refcount = atomic_read(&inode->i_count);
 	evfs_i->_prop.inlined = 0; /* FS-specific code should take care of it */
 }
