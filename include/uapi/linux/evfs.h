@@ -23,7 +23,6 @@ typedef unsigned int u32;
 struct evfs_extent {
     unsigned long start;     // if set to zero, means allocate any of length
     unsigned long length;
-    unsigned long ino_nr;
 };
 
 struct evfs_super_block {
@@ -174,17 +173,12 @@ struct evfs_extent_alloc_op {
     struct evfs_extent extent;
 };
 
+/* struct __evfs_fsp_iter_param { */
+/*     u32 addr; */
+/*     unsigned long length; */
+/* }; */
 
-struct __evfs_ext_iter_param {
-    u32 log_blkoff;
-    u32 phy_blkoff;
-    unsigned long length;
-};
-
-struct __evfs_fsp_iter_param {
-    u32 addr;
-    unsigned long length;
-};
+typedef struct __evfs_fsp_iter_param evfs_extent;
 
 struct __evfs_ino_iter_param {
     unsigned long ino_nr;
@@ -354,8 +348,7 @@ struct evfs_atomic_op {
 #define FS_IOC_INODE_MAP _IOR('f', 78, struct evfs_imap)
 #define FS_IOC_INODE_UNMAP _IOR('f', 79, struct evfs_imap)
 #define FS_IOC_EXTENT_ITERATE _IOR('f', 80, struct evfs_iter_ops)
-#define FS_IOC_FREESP_ITERATE _IOR('f', 81, struct evfs_iter_ops)
-#define FS_IOC_INODE_ITERATE _IOR('f', 82, struct evfs_iter_ops)
+#define FS_IOC_INODE_ITERATE _IOR('f', 81, struct evfs_iter_ops)
 #define FS_IOC_SUPER_GET _IOR('f', 83, struct evfs_super_block)
 #define FS_IOC_SUPER_SET _IOWR('f', 84, struct evfs_super_block)
 #define FS_IOC_META_MOVE _IOR('f', 85, struct evfs_meta_mv_ops)

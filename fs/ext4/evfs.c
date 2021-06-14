@@ -830,65 +830,7 @@ ext4_evfs_extent_iter(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
 	struct evfs_iter_ops iter;
-	struct __evfs_ext_iter_param param = { 0 };
-	struct inode *vfs_inode;
-
-	struct extent_status es;
-
-	ext4_lblk_t last, end;
-	int ret;
-
-	if (copy_from_user(&iter, (struct evfs_iter_ops __user *) arg, sizeof(iter)))
-		return -EFAULT;
-
-	vfs_inode = ext4_iget_normal(sb, iter.ino_nr);
-	if (IS_ERR(vfs_inode)) {
-		ext4_msg(sb, KERN_ERR, "iget failed during evfs");
-		return PTR_ERR(vfs_inode);
-	}
-
-	// start_from is implicitly >> blkbits
-	last = iter.start_from;
-	// TODO(tbrindus): i_sb == sb, can probably replace?
-	end = i_size_read(vfs_inode) >> vfs_inode->i_sb->s_blocksize_bits;
-
-	iter.count = 0;
-	do {
-		ret = ext4_get_next_extent(vfs_inode, last, end - last + 1, &es);
-		if (ret == 0)
-			break;
-
-		if (ret < 0)
-			goto err_next_extent;
-
-		// ext4 has status flags in higher bits of pblk, so mask them out.
-		param.phy_blkoff = es.es_pblk & ~ES_MASK;
-		param.log_blkoff = es.es_lblk;
-		param.length = es.es_len;
-
-		if (evfs_copy_param(&iter, &param, sizeof(param))) {
-			ret = 1;
-			goto out;
-		}
-
-		last += es.es_len;
-	} while (last <= end);
-
-out:
-	if (copy_to_user((struct evfs_iter_ops __user *) arg, &iter,
-				sizeof(struct evfs_iter_ops)))
-		ret = -EFAULT;
-err_next_extent:
-	iput(vfs_inode);
-	return ret;
-}
-
-static long
-ext4_evfs_freesp_iter(struct file *filp, struct super_block *sb,
-		unsigned long arg)
-{
-	struct evfs_iter_ops iter;
-	struct __evfs_fsp_iter_param param = { 0 };
+	struct evfs_extent param = { 0 };
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
 	struct ext4_group_info *grp;
 	struct ext4_group_desc *gdp;
@@ -941,12 +883,12 @@ ext4_evfs_freesp_iter(struct file *filp, struct super_block *sb,
 			int is_set = mb_test_bit(off_block, bh->b_data);
 			if (!is_set && !start_marked) {
 				start_marked = 1;
-				param.addr = (group * EXT4_BLOCKS_PER_GROUP(sb)) + off_block;
+				param.start = (group * EXT4_BLOCKS_PER_GROUP(sb)) + off_block;
 				param.length = 1;
 			} else if (is_set && start_marked) {
 				start_marked = 0;
 				if (evfs_copy_param(&iter, &param,
-							sizeof(struct __evfs_fsp_iter_param))) {
+							sizeof(struct evfs_extent))) {
 					err = 1;
 					goto cleanup;
 				}
@@ -955,7 +897,7 @@ ext4_evfs_freesp_iter(struct file *filp, struct super_block *sb,
 				if (param.length == INT_MAX) {
 					start_marked = 0;
 					if (evfs_copy_param(&iter, &param,
-								sizeof(struct __evfs_fsp_iter_param))) {
+								sizeof(struct evfs_extent))) {
 						err = 1;
 						goto cleanup;
 					}
@@ -966,7 +908,7 @@ ext4_evfs_freesp_iter(struct file *filp, struct super_block *sb,
 		if (start_marked) {
 			start_marked = 0;
 			if (evfs_copy_param(&iter, &param,
-						sizeof(struct __evfs_fsp_iter_param))) {
+						sizeof(struct evfs_extent))) {
 				err = 1;
 				goto cleanup;
 			}
@@ -1121,8 +1063,6 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return ext4_evfs_extent_free(filp, sb, arg);
 	case FS_IOC_EXTENT_ITERATE:
 		return ext4_evfs_extent_iter(filp, sb, arg);
-	case FS_IOC_FREESP_ITERATE:
-		return ext4_evfs_freesp_iter(filp, sb, arg);
 	case FS_IOC_SUPER_GET:
 		return ext4_evfs_sb_get(sb, arg);
 	}

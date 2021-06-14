@@ -48,14 +48,13 @@ int evfs_efree(int fd, int argc, char **argv)
 	struct evfs_extent ext;
 	int ret;
 
-	if (argc != 3) {
-		fprintf(stderr, "usage: evfs_runner efree <ino_nr> <blkaddr> <length>\n");
+	if (argc != 2) {
+		fprintf(stderr, "usage: evfs_runner efree <blkaddr> <length>\n");
 		return 1;
 	}
 
-	ext.ino_nr = strtoll(argv[0], NULL, 10);
-	ext.start = strtoll(argv[1], NULL, 10);
-	ext.length = strtoll(argv[2], NULL, 10);
+	ext.start = strtoll(argv[0], NULL, 10);
+	ext.length = strtoll(argv[1], NULL, 10);
 
 	ret = ioctl(fd, FS_IOC_EXTENT_FREE, &ext);
 	if (ret) {
@@ -120,16 +119,9 @@ int evfs_ewrite(int fd, int argc, char **argv)
 
 int evfs_eiter(int fd, int argc, char **argv)
 {
-	struct __evfs_ext_iter_param *param;
+	struct evfs_extent *param;
 	struct evfs_iter_ops iter = { .start_from = 0 };
 	int ret = 0, count = 0;
-
-	if (argc != 1) {
-		fprintf(stderr, "usage: evfs_runner eiter <ino_nr>\n");
-		return 1;
-	}
-
-	iter.ino_nr = strtoll(argv[0], NULL, 10);
 
 iterate:
 	ret = ioctl(fd, FS_IOC_EXTENT_ITERATE, &iter);
@@ -139,45 +131,13 @@ iterate:
 	}
 
 	while (count < iter.count) {
-		param = ((struct __evfs_ext_iter_param *) iter.buffer) + count;
-
-		printf("inode: %lu, log_blkoff: %lu, phy_blkoff: %lu, "
-				"length: %lu\n", iter.ino_nr,
-				param->log_blkoff, param->phy_blkoff,
-				param->length);
-
+		param = ((struct evfs_extent *) iter.buffer) + count;
+		printf("addr: %lu, length: %lu\n", param->start, param->length);
 		++count;
 	}
 
 	count = 0;
-	iter.start_from = param->log_blkoff + param->length;
-	if (ret)
-		goto iterate;
-
-	return 0;
-}
-
-int evfs_freespiter(int fd, int argc, char **argv)
-{
-	struct __evfs_fsp_iter_param *param;
-	struct evfs_iter_ops iter = { .start_from = 0 };
-	int ret = 0, count = 0;
-
-iterate:
-	ret = ioctl(fd, FS_IOC_FREESP_ITERATE, &iter);
-	if (ret < 0) {
-		perror("ioctl");
-		return 1;
-	}
-
-	while (count < iter.count) {
-		param = ((struct __evfs_fsp_iter_param *) iter.buffer) + count;
-		printf("addr: %lu, length: %lu\n", param->addr, param->length);
-		++count;
-	}
-
-	count = 0;
-	iter.start_from = param->addr + param->length;
+	iter.start_from = param->start + param->length;
 	if (ret)
 		goto iterate;
 
@@ -584,8 +544,6 @@ int main(int argc, char **argv)
 		command_fn = &evfs_ewrite;
 	else if (!strcmp(command, "eiter"))
 		command_fn = &evfs_eiter;
-	else if (!strcmp(command, "freespiter"))
-		command_fn = &evfs_freespiter;
 	else if (!strcmp(command, "inoiter"))
 		command_fn = &evfs_inoiter;
 	else if (!strcmp(command, "dadd"))

@@ -528,98 +528,11 @@ f2fs_evfs_extent_write(struct file *filp, struct super_block *sb, unsigned long 
 	return 0;
 }
 
-long
+static long
 f2fs_evfs_extent_iter(struct file *filp, struct super_block *sb, unsigned long arg)
 {
 	struct evfs_iter_ops iter;
-	struct __evfs_ext_iter_param param;
-	struct dnode_of_data dn;
-	struct inode *inode;
-	block_t blk_addr;
-	pgoff_t offset = 0, end_offset;
-	int ret = 0;
-
-	if (copy_from_user(&iter, (struct evfs_iter_ops __user *) arg,
-				sizeof(struct evfs_iter_ops)))
-		return -EFAULT;
-
-	inode = f2fs_iget(sb, iter.ino_nr);
-	if (IS_ERR(inode)) {
-		f2fs_msg(sb, KERN_ERR, "evfs_extent_iter: given inode "
-				"does not exist");
-		return PTR_ERR(inode);
-	}
-
-	/* Make sure everything is committed first */
-	commit_inmem_pages(inode);
-
-	if (f2fs_has_inline_data(inode)) {
-		f2fs_msg(sb, KERN_ERR, "evfs_extent_iteration: "
-				"given inode contains inlined data");
-		ret = -EINVAL;
-		goto out;
-	}
-
-	iter.count = 0;
-	offset = iter.start_from;
-
-	/* Block size == page size */
-	end_offset = i_size_read(inode) >> PAGE_SHIFT;
-	param.phy_blkoff = param.log_blkoff = param.length = 0;
-
-	for (; offset <= end_offset; offset++) {
-		set_new_dnode(&dn, inode, NULL, NULL, 0);
-		ret = get_dnode_of_data(&dn, offset, LOOKUP_NODE);
-
-		/*
-		 * If there are no entry for given logical block,
-		 * it might just be that there is an "hole" in the
-		 * file. So, just continue
-		 */
-		if (ret == -ENOENT)
-			continue;
-
-		blk_addr = datablock_addr(dn.node_page, dn.ofs_in_node);
-
-		if (!param.phy_blkoff) {
-			param.phy_blkoff = blk_addr;
-			param.log_blkoff = offset;
-			param.length = 1;
-		} else if (param.phy_blkoff != blk_addr - param.length) {
-			if (evfs_copy_param(&iter, &param,
-					sizeof(struct __evfs_ext_iter_param))) {
-				ret = 1;
-				goto out;
-			}
-			param.phy_blkoff = blk_addr;
-			param.log_blkoff = offset;
-			param.length = 1;
-		} else {
-			++param.length;
-		}
-
-		f2fs_put_dnode(&dn);
-	}
-
-	/* Read the last extent as well */
-	if (param.phy_blkoff) {
-		evfs_copy_param(&iter, &param,
-				sizeof(struct __evfs_ext_iter_param));
-	}
-
-out:
-	if (copy_to_user((struct evfs_iter_ops __user *) arg, &iter,
-				sizeof(struct evfs_iter_ops)))
-		return -EFAULT;
-	iput(inode);
-	return ret;
-}
-
-long
-f2fs_evfs_freesp_iter(struct file *filp, struct super_block *sb, unsigned long arg)
-{
-	struct evfs_iter_ops iter;
-	struct __evfs_fsp_iter_param param;
+	struct evfs_extent param;
 	struct f2fs_sb_info *sbi = F2FS_SB(sb);
 	struct seg_entry *se;
 	unsigned int max_segno = MAIN_SEGS(sbi), segno = 0;
@@ -640,7 +553,7 @@ f2fs_evfs_freesp_iter(struct file *filp, struct super_block *sb, unsigned long a
 	for (; segno < max_segno; segno++) {
 		se = get_seg_entry(sbi, segno);
 		param.length = 0;
-		param.addr = 0;
+		param.start = 0;
 
 		/* We only care about data blocks */
 		if (!IS_DATASEG(se->type))
@@ -652,7 +565,7 @@ f2fs_evfs_freesp_iter(struct file *filp, struct super_block *sb, unsigned long a
 		for(; blkoff < max_blkoff; blkoff++) {
 			if (!(f2fs_test_bit(blkoff, se->cur_valid_map))) {
 				if (!param.length) {
-					param.addr = START_BLOCK(sbi, segno)
+					param.start = START_BLOCK(sbi, segno)
 							+ blkoff;
 					param.length = 1;
 				} else {
@@ -660,25 +573,25 @@ f2fs_evfs_freesp_iter(struct file *filp, struct super_block *sb, unsigned long a
 				}
 			} else if (param.length) {
 				if (evfs_copy_param(&iter, &param,
-					sizeof(struct __evfs_fsp_iter_param))) {
-					ret = (param.addr + param.length
+					sizeof(struct evfs_extent))) {
+					ret = (param.start + param.length
 							>= MAX_BLKADDR(sbi))
 						? 0 : 1;
 					goto out;
 				}
-				param.addr = 0;
+				param.start = 0;
 				param.length = 0;
 			}
 		}
 
 		if (param.length) {
 			if (evfs_copy_param(&iter, &param,
-				sizeof(struct __evfs_fsp_iter_param))) {
-				ret = (param.addr + param.length
+				sizeof(struct evfs_extent))) {
+				ret = (param.start + param.length
 						>= MAX_BLKADDR(sbi)) ? 0 : 1;
 				goto out;
 			}
-			param.addr = 0;
+			param.start = 0;
 			param.length = 0;
 		}
 		blkoff = 0;
@@ -1452,8 +1365,6 @@ f2fs_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return f2fs_evfs_extent_write(filp, sb, arg);
 	case FS_IOC_EXTENT_ITERATE:
 		return f2fs_evfs_extent_iter(filp, sb, arg);
-	case FS_IOC_FREESP_ITERATE:
-		return f2fs_evfs_freesp_iter(filp, sb, arg);
 	case FS_IOC_INODE_ALLOC:
 		return f2fs_evfs_inode_alloc(filp, sb, arg);
 	case FS_IOC_INODE_FREE:

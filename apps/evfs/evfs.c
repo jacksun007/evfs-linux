@@ -66,9 +66,19 @@ evfs_iter_t * inode_iter(evfs_t * evfs, int flags)
 
 evfs_iter_t * extent_iter(evfs_t * evfs, int flags)
 {
-    (void)evfs;
-    (void)flags;
-    return NULL;
+    evfs_iter_t *iter = malloc(sizeof(evfs_iter_t));
+    iter->evfs = evfs;
+    iter->type = EVFS_TYPE_EXTENT;
+    iter->flags = flags;
+    iter->count = 0;
+    iter->next_req = 0;
+    
+    if (ioctl(evfs->fd, FS_IOC_EXTENT_ITERATE, &iter->op) < 0) {
+        free(iter);
+        return NULL;
+    }
+
+    return iter;
 }
 
 u64 inode_next(evfs_iter_t * it)
@@ -93,9 +103,35 @@ u64 inode_next(evfs_iter_t * it)
     return param->ino_nr;
 }
 
+struct evfs_extent extent_next(evfs_iter_t * it)
+{
+    struct evfs_extent *param, ret = { 0 };
+    if (it->type != EVFS_TYPE_EXTENT)
+        return ret;
+    
+    if (it->op.count < it->count) {
+        it->op.start_from = it->next_req;
+        if (ioctl(it->evfs->fd, FS_IOC_EXTENT_ITERATE, &it->op) <= 0)
+            return ret;   
+        it->count = 0;
+    }
+    
+    param = ((struct evfs_extent *) it->op.buffer) + it->count;
+    ++it->count;
+    it->next_req = param->addr + param->len;
+    ret = *param;
+
+    return ret;
+}
+
 void iter_end(evfs_iter_t * it)
 {
     free(it);
+}
+
+int evfs_operation(evfs_t * evfs, int op, void * arg)
+{
+    return ioctl(evfs->fd, op, arg);
 }
 
 int super_info(evfs_t * evfs, struct evfs_super_block * sb)

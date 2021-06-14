@@ -47,16 +47,6 @@ typedef struct evfs_iter_s {
 /*
  * For iterating
  */
-struct __evfs_ext_iter_param {
-    u32 log_blkoff;
-    u32 phy_blkoff;
-    unsigned long length;
-};
-
-struct __evfs_fsp_iter_param {
-    u32 addr;
-    unsigned long length;
-};
 
 /*
  * TODO (kyokeun): evfs_inode no longer required, since
