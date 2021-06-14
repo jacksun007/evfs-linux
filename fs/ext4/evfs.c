@@ -259,8 +259,7 @@ ext4_evfs_inode_read(struct file *filp, struct super_block *sb,
 }
 
 static long
-ext4_evfs_inode_get(struct file *filp, struct super_block *sb,
-		unsigned long arg)
+ext4_evfs_inode_info(struct super_block *sb, void __user * arg)
 {
 	struct inode *vfs_inode;
 	struct evfs_inode i;
@@ -276,6 +275,19 @@ ext4_evfs_inode_get(struct file *filp, struct super_block *sb,
 
 	vfs_to_evfs_inode(vfs_inode, &i);
 
+	ext4_msg(sb, KERN_ERR,
+			"no : %ld\n"
+		 	"mode : %d\n"
+			"uid : %d\n"
+			"gid : %d\n"
+			"refcount : %d\n",
+		vfs_inode->i_ino,
+		vfs_inode->i_mode,
+		vfs_inode->i_uid.val,
+		vfs_inode->i_gid.val,
+		atomic_read(&vfs_inode->i_count));
+
+
 	iput(vfs_inode);
 	if (copy_to_user((struct evfs_inode __user *) arg, &i, sizeof(i)))
 		return -EFAULT;
@@ -283,8 +295,7 @@ ext4_evfs_inode_get(struct file *filp, struct super_block *sb,
 }
 
 static long
-ext4_evfs_inode_set(struct file *filp, struct super_block *sb,
-					unsigned long arg)
+ext4_evfs_inode_set(struct super_block * sb, void __user * arg)
 {
 	struct inode *inode;
 	struct evfs_inode evfs_i;
@@ -300,7 +311,6 @@ ext4_evfs_inode_set(struct file *filp, struct super_block *sb,
 
 	evfs_to_vfs_inode(&evfs_i, inode);
 	write_inode_now(inode, 1);
-	// mark_inode_dirty(inode);
 	iput(inode);
 
 	return 0;
@@ -1028,13 +1038,14 @@ ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 	long err = -1;
 
 	switch (op->code) {
-		case EVFS_INODE_INFO:
-			break;
-		case EVFS_INODE_UPDATE:
-			err = ext4_evfs_inode_set;
-			break;
-		default:
-			panic("not implemented. should not get here\n");
+	case EVFS_INODE_INFO:
+		err = ext4_evfs_inode_info(aa->sb, op->data);
+		break;
+	case EVFS_INODE_UPDATE:
+		err = ext4_evfs_inode_set(aa->sb, op->data);
+		break;
+	default:
+		panic("not implemented. should not get here\n");
 	}
 	return err;
 }
@@ -1053,7 +1064,7 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case FS_IOC_ATOMIC_ACTION:
-		return evfs_run_atomic_action(sb, &ext4_evfs_atomic_ops, arg);
+		return evfs_run_atomic_action(sb, &ext4_evfs_atomic_ops, (void *) arg);
 	case FS_IOC_INODE_LOCK:
 		if (get_user(ino_nr, (unsigned long __user *) arg))
 			return -EFAULT;
@@ -1091,9 +1102,9 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case FS_IOC_EXTENT_WRITE:
 		return ext4_evfs_extent_write(filp, sb, arg);
 	case FS_IOC_INODE_GET:
-		return ext4_evfs_inode_get(filp, sb, arg);
+		return ext4_evfs_inode_info(sb, (void *) arg);
 	case FS_IOC_INODE_SET:
-		return ext4_evfs_inode_set(filp, sb, arg);
+		return ext4_evfs_inode_set(sb, (void *) arg);
 	case FS_IOC_INODE_READ:
 		return ext4_evfs_inode_read(filp, sb, arg);
 	case FS_IOC_INODE_MAP:

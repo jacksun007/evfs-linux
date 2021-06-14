@@ -293,9 +293,14 @@ int evfs_iset(int fd, int argc, char **argv)
 	}
 
 	inode.ino_nr = strtoll(argv[0], NULL, 10);
+
+	if (ioctl(fd, FS_IOC_INODE_GET, &inode) < 0) {
+		perror("iget");
+		return 1;
+	}
+
 	inode.uid = strtoll(argv[1], NULL, 10);
 	inode.gid = strtoll(argv[2], NULL, 10);
-	inode.mode = S_IFREG;
 
 	if (ioctl(fd, FS_IOC_INODE_SET, &inode) < 0) {
 		perror("ioctl");
