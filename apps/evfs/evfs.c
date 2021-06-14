@@ -129,6 +129,9 @@ void iter_end(evfs_iter_t * it)
     free(it);
 }
 
+/*
+ * TODO (kyokeun): Placeholder for now
+ */
 int evfs_operation(evfs_t * evfs, int op, void * arg)
 {
     return ioctl(evfs->fd, op, arg);
