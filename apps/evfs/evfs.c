@@ -129,14 +129,6 @@ void iter_end(evfs_iter_t * it)
     free(it);
 }
 
-/*
- * TODO (kyokeun): Placeholder for now
- */
-int evfs_operation(evfs_t * evfs, int op, void * arg)
-{
-    return ioctl(evfs->fd, op, arg);
-}
-
 int super_info(evfs_t * evfs, struct evfs_super_block * sb)
 {
     (void)evfs;
