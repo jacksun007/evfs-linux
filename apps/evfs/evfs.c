@@ -133,9 +133,7 @@ int extent_write(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len)
 
 int inode_info(evfs_t * evfs, struct evfs_inode * inode)
 {
-    (void)evfs;
-    (void)inode;
-    return -EINVAL;
+    return evfs_operation(evfs, EVFS_INODE_INFO, inode);
 }
 
 int inode_update(evfs_t * evfs, struct evfs_inode * inode)

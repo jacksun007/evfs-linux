@@ -3,7 +3,7 @@
 #
 
 CC=gcc
-CFLAGS=-Wall -Wextra -Werror -I../evfs/include -L../evfs
+CFLAGS=-Wall -Wextra -Werror -I../evfs/include -L../evfs -ggdb
 LOADLIBES=-levfs
 PROG=test
 

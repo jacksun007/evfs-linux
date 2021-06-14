@@ -19,17 +19,19 @@ static struct atomic_action * atomic_action_new(unsigned capacity) {
         sizeof(struct evfs_opentry)*capacity);
     
     if (aa != NULL) {
-        aa->count = 0;
-        aa->capacity = capacity;
-        aa->errop = 0;
+        aa->param.count = 0;
+        aa->param.capacity = capacity;
+        aa->param.errop = 0;
     }
     
     return aa;
 }
 
 static int 
-atomic_action_append(struct atomic_action * aa, int opcode, void * data)
+atomic_action_append(struct atomic_action * aab, int opcode, void * data)
 {
+    struct atomic_action_param * aa = &aab->param;
+
     if (aa == NULL) {
         return -EINVAL;
     }
@@ -107,7 +109,7 @@ int atomic_execute(struct evfs_atomic * ea)
     struct atomic_action * aa = to_atomic_action(ea);
     
     /* on the kernel side, we do not send in the header */
-    int ret = ioctl(ea->fd, FS_IOC_ATOMIC_ACTION, (char *)aa + sizeof(evfs_t));
+    int ret = ioctl(ea->fd, FS_IOC_ATOMIC_ACTION, &aa->param);
     
     if (ret < 0) {
         return -errno;
@@ -118,14 +120,7 @@ int atomic_execute(struct evfs_atomic * ea)
 
 void atomic_end(struct evfs_atomic * ea)
 {
-    int i;
-    struct atomic_action * aa = to_atomic_action(ea);
-
-    for (i = 0; i < aa->count; i++) {
-        free(aa->item[i].data);
-    }
-    
-    free(aa);
+    free(ea);
 }
 
 

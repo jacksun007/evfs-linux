@@ -544,6 +544,7 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
                 break;
             default:
                 ret = -EINVAL;
+                aa->param.errop = entry->id;
         }
         
         if (ret < 0) {
@@ -584,19 +585,27 @@ evfs_run_atomic_action(struct super_block * sb,
         return ret;
     }
     
+    //printk("atomic_action: %d read, %d comp, %d write\n", 
+    //    aa->nr_read, aa->nr_comp, aa->write_op ? 1 : 0);
+    
     ret = evfs_new_lock_set(aa, &lk);
     if (ret < 0) {
         goto fail;
     }
     
     /* lock everything */
-    i = 0; lkb = lk;
+    i = 0;    
+    lkb = lk;
     while (lkb->type != EVFS_TYPE_INVALID) {
         ret = fop->lock(aa, lkb);
         if (ret < 0) {
+            printk("evfs warning: could not lock type = %u, id = %lu\n",
+                   lkb->type, lkb->object_id);
             goto unlock;
         }
-        
+             
+        //printk("locked: type = %u, id = %lu, exclusive = %d\n",
+        //    lkb->type, lkb->object_id, lkb->exclusive); 
         i++; lkb++;
     }
     
@@ -635,7 +644,9 @@ unlock:
     j = 0; lkb = lk;
     while (lkb->type != EVFS_TYPE_INVALID && j < i) {
         fop->unlock(aa, lkb);
-        lkb++;
+        //printk("unlocked: type = %u, id = %lu, exclusive = %d\n",
+        //    lkb->type, lkb->object_id, lkb->exclusive); 
+        j++; lkb++;
     } 
     
 fail:

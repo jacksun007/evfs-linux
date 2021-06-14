@@ -3,7 +3,7 @@
 #
 
 CC=gcc
-CFLAGS=-Wall -Wextra -Werror -O2 -I./include
+CFLAGS=-Wall -Wextra -Werror -ggdb -I./include
 PROG=libevfs.a
 
 all: depend $(PROG)

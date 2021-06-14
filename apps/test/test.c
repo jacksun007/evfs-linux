@@ -6,6 +6,7 @@
  */
 
 #include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
 #include <errno.h>
 #include <evfs.h>
@@ -39,7 +40,8 @@ int main(int argc, char * argv[])
     inode.ino_nr = (u64)atoi(argv[2]);
     ret = inode_info(evfs, &inode);
     if (ret < 0) {
-        fprintf(stderr, "error: cannot read inode %llu\n", inode.ino_nr);
+        fprintf(stderr, "error: cannot read inode %llu, errno = %s\n", 
+            inode.ino_nr, strerror(-ret));
     }
     else {
         printf("size of inode %llu is %llu\n", inode.ino_nr, inode.bytesize);

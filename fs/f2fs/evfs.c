@@ -1386,8 +1386,9 @@ f2fs_evfs_lock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable)
     switch (lockable->type) {
     case EVFS_TYPE_INODE:
         err = f2fs_evfs_inode_lock(aa->sb, lockable);
+        break;
     default:
-        panic("not implemented. should not get here\n");
+        printk("evfs: cannot lock object type %u\n", lockable->type);
     }
     
     return err;
@@ -1402,7 +1403,7 @@ f2fs_evfs_unlock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable
         f2fs_evfs_inode_unlock(aa->sb, lockable);
         break;
     default:
-        panic("not implemented. should not get here\n");
+        printk("evfs: cannot unlock object type %u\n", lockable->type);
     }
 }
 
