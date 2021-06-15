@@ -10,9 +10,8 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <evfs.h>
-#include "atomic.h"
-#include "ioctl.h"
+#include "evfslib.h"
+
 
 static struct atomic_action * atomic_action_new(unsigned capacity) {
     struct atomic_action * aa = malloc(sizeof(struct atomic_action) + 
@@ -30,7 +29,7 @@ static struct atomic_action * atomic_action_new(unsigned capacity) {
 static int 
 atomic_action_append(struct atomic_action * aab, int opcode, void * data)
 {
-    struct atomic_action_param * aa = &aab->param;
+    struct evfs_atomic_action_param * aa = &aab->param;
 
     if (aa == NULL) {
         return -EINVAL;

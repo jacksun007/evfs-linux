@@ -13,10 +13,8 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <stropts.h>
-#include <evfs.h>
-#include "struct.h"
-#include "ioctl.h"
-#include "atomic.h"
+#include "evfslib.h"
+
 
 evfs_t * evfs_open(const char * dev)
 {

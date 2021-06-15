@@ -1,28 +1,26 @@
-#ifndef EVFSPUB_H_
-#define EVFSPUB_H_
+/*
+ * evfs.h
+ *
+ * Linux Evfs kernel API (public -- also used by application developer)
+ *
+ */ 
 
-typedef unsigned long long u64;
+#ifndef UAPI_EVFS_H_
+#define UAPI_EVFS_H_
+
+// defined by int-ll64.h which is included by <linux/fs.h>
+// typedef unsigned long u64; 
+
 typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
-typedef long long i64;
+typedef long i64;
 typedef int i32;
-
-// (jsun):
-// use the name evfs_t for non-atomic usage
-// use the name struct evfs_atomic for atomic usage
-
-struct evfs_atomic;
-typedef struct evfs_atomic evfs_t;
 
 struct evfs_extent {
     u64 addr;   // block address
     u64 len;    // number of blocks
 };
-
-// generic iterator type (opaque to user)
-struct evfs_iter_s;
-typedef struct evfs_iter_s evfs_iter_t;
 
 struct evfs_super_block {
     u64 max_extent_size;  /* maximum allowed size of a given extent */
@@ -64,19 +62,19 @@ struct evfs_inode {
 };
 
 struct evfs_metadata {
-    unsigned long blkaddr;
-    unsigned long size; // Block-level granularity
-    unsigned long owner; // TODO: Does it make sense for this to be just inode? Maybe optional?
-    int loc_type;
-    int type;
+    u64 blkaddr;
+    u64 size;   // Block-level granularity
+    u64 owner;  // TODO: Does it make sense for this to be just inode? Maybe optional?
+    u32 loc_type;
+    u32 type;
 
     /* TODO: In order to be able to move metadata, the user needs
      *       some idea of where they can move the data to. Returning
      *       this "meta region" should help with that, but not entirely
      *       sure if it makes sense to be in this struct.
      */
-    unsigned long region_start;
-    unsigned long region_len;
+    u64 region_start;
+    u64 region_len;
 };
 
 // mapping entry
@@ -107,41 +105,5 @@ enum evfs_field {
     // TODO: add fields of other objects
 };
 
-// basic open/close for evfs device
-evfs_t * evfs_open(const char * dev);
-void evfs_close(evfs_t * evfs);
+#endif // UAPI_EVFS_H_
 
-// iterators
-evfs_iter_t * inode_iter(evfs_t * evfs, int flags);
-evfs_iter_t * extent_iter(evfs_t * evfs, int flags);    // free space
-u64 inode_next(evfs_iter_t * it);
-struct evfs_extent extent_next(evfs_iter_t * it);
-void iter_end(evfs_iter_t * it);
-
-// extent
-int extent_alloc(evfs_t * evfs, u64 pa, u64 len, int flags);
-int extent_free(evfs_t * evfs, u64 pa);
-int extent_write(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len);
-
-// super block
-int super_info(evfs_t * evfs, struct evfs_super_block * sb);
-
-// inode
-int inode_info(evfs_t * evfs, struct evfs_inode * inode);
-int inode_update(evfs_t * evfs, struct evfs_inode * inode);
-int inode_map(evfs_t * evfs, u64 ino_nr, struct evfs_imap * imap);
-int inode_read(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len);
-
-// inode mapping
-struct evfs_imap * imap_new(evfs_t * evfs);
-struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr);
-int imap_append(struct evfs_imap * imap, u64 la, u64 pa, u64 len);
-void imap_free(evfs_t * evfs, struct evfs_imap * imap, int nofree);
-
-// atomic interface
-struct evfs_atomic * atomic_begin(evfs_t * evfs);
-int atomic_const_equal(struct evfs_atomic * aa, int id, int field, u64 rhs);
-int atomic_execute(struct evfs_atomic * aa);
-void atomic_end(struct evfs_atomic * aa);
-
-#endif // EVFSPUB_H_

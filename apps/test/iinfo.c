@@ -1,7 +1,7 @@
 /*
- * test.c
+ * iinfo.c
  *
- * Tests various Evfs operations
+ * Tests inode_info
  *
  */
 
@@ -29,14 +29,14 @@ const char * timevalstr(struct evfs_timeval * tv)
     
     loctime = localtime((const time_t *)&tv->tv_sec);
     len = strftime(buf, sizeof(buf), "%F %T.", loctime);
-    snprintf(buf + len, sizeof(buf) - len, "%06llu", tv->tv_usec);
+    snprintf(buf + len, sizeof(buf) - len, "%06lu", tv->tv_usec);
     return buf;
 }
 
 // TODO: complete me
 void print_inode(struct evfs_inode * inode)
 {
-    printf("ino_nr: %llu\n", inode->ino_nr);
+    printf("ino_nr: %lu\n", inode->ino_nr);
     printf("atime: %s\n", timevalstr(&inode->atime));
     printf("ctime: %s\n", timevalstr(&inode->ctime));
     printf("mtime: %s\n", timevalstr(&inode->mtime));
@@ -45,10 +45,10 @@ void print_inode(struct evfs_inode * inode)
     printf("gid: %u\n", inode->gid);
     printf("mode: 0x%X\n", inode->mode);
     printf("flags: 0x%X\n", inode->flags);
-    printf("bytesize: %llu\n", inode->bytesize);
+    printf("bytesize: %lu\n", inode->bytesize);
     printf("refcount: %u\n", inode->prop.refcount);
-    printf("blockcount: %llu\n", inode->prop.blockcount);
-    printf("inlined_bytes: %llu\n", inode->prop.inlined_bytes);
+    printf("blockcount: %lu\n", inode->prop.blockcount);
+    printf("inlined_bytes: %lu\n", inode->prop.inlined_bytes);
 }
 
 int main(int argc, char * argv[])
@@ -72,7 +72,7 @@ int main(int argc, char * argv[])
     inode.ino_nr = (u64)atoi(argv[2]);
     ret = inode_info(evfs, &inode);
     if (ret < 0) {
-        fprintf(stderr, "error: cannot read inode %llu, errno = %s\n", 
+        fprintf(stderr, "error: cannot read inode %lu, errno = %s\n", 
             inode.ino_nr, strerror(-ret));
     }
     else {

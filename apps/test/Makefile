@@ -3,14 +3,23 @@
 #
 
 CC=gcc
-CFLAGS=-Wall -Wextra -Werror -I../evfs/include -L../evfs -ggdb
+EVFSDIR=../evfs
+EVFSLIB=$(EVFSDIR)/libevfs.a
 LOADLIBES=-levfs
-PROG=test
+CFLAGS=-Wall -Wextra -Werror -I$(EVFSDIR)/include -L../evfs -ggdb
+PROG=iinfo iup
+
 
 all: depend $(PROG)
 
-$(PROG): test.o ../evfs/libevfs.a
+iinfo: iinfo.o $(EVFSLIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
+
+iup: iup.o $(EVFSLIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
+
+$(EVFSLIB):
+	cd $(EVFSDIR) && $(MAKE)
 	
 .PHONY: clean
 clean:

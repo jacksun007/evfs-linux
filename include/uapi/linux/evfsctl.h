@@ -1,7 +1,20 @@
-#ifndef EVFSPRIV_H_
-#define EVFSPRIV_H_
+/*
+ * evfsctl.h
+ *
+ * Linux Evfs kernel API (private -- only used by library developer)
+ *
+ * Add more definition here for enums and structures shared between
+ * evfs library and kernel, BUT NOT seen by evfs application developers.
+ *
+ * IMPORTANT: you MUST include uapi/linux/evfs.h before this file. i.e.
+ *
+ * #include <uapi/linux/evfs.h>
+ * #include <uapi/linux/evfsctl.h>c
+ * 
+ */ 
 
-#include "evfspub.h"
+#ifndef UAPI_EVFSCTL_H_
+#define UAPI_EVFSCTL_H_
 
 enum evfs_type {
     EVFS_TYPE_INVALID,
@@ -28,6 +41,7 @@ enum evfs_type {
 #define EVFS_META_UNKNOWN 	0xff
 
 #define EVFS_IMAP_UNMAP_ONLY 0x1 /* Only unmap rather than free as well */
+
 struct __evfs_imap {
     unsigned long ino_nr;
     u32 log_blkoff;
@@ -76,9 +90,7 @@ struct evfs_inode_read_op {
     unsigned long length;
 };
 
-/*
- * For iterating
- */
+// all iteration operations 
 
 /*
  * Struct to pass into the ioctl call for all iterate calls.
@@ -94,21 +106,13 @@ struct evfs_inode_read_op {
  *     - 1, if there are more items left
  *     - 0, if there are no more items to iterate
  */
+
 struct evfs_iter_ops {
     char buffer[EVFS_BUFSIZE];
     unsigned long count; /* Number of parameters that resides in the buffer */
     unsigned long start_from;
     unsigned long ino_nr; /* Used for extent iter, ignored by rest */
 };
-
-typedef struct evfs_iter_s {
-    evfs_t * evfs;
-    int type;
-    int flags;
-    u64 count;
-    u64 next_req;
-    struct evfs_iter_ops op;
-} evfs_iter_t;
 
 /*
  * TODO (kyokeun): evfs_inode no longer required, since
@@ -125,6 +129,83 @@ struct __evfs_meta_iter {
     struct evfs_metadata md;
 };
 
+// atomic compare
+
+struct evfs_const_comp {
+    int id;
+    int field;
+    u64 rhs;
+};
+
+// atomic action
+
+enum evfs_opcode {
+    EVFS_OPCODE_INVALID = 0,
+
+    // compare operations
+    EVFS_COMP_OP_BEGIN,
+    
+    EVFS_CONST_EQUAL = EVFS_COMP_OP_BEGIN, // compare field with a constant
+    EVFS_FIELD_EQUAL,                      // compare field with another field
+    
+    EVFS_COMP_OP_END,
+    
+    // read operations
+    EVFS_READ_OP_BEGIN = EVFS_COMP_OP_END,
+ 
+    EVFS_INODE_INFO = EVFS_READ_OP_BEGIN,
+    EVFS_SUPER_INFO,
+    EVFS_DIRENT_INFO,
+
+    EVFS_EXTENT_READ,   // read raw data from extent
+    EVFS_INODE_READ,    // same as posix read()
+
+    EVFS_READ_OP_END,
+
+    // write operations
+    EVFS_WRITE_OP_BEGIN = EVFS_READ_OP_END,
+    
+    EVFS_INODE_UPDATE = EVFS_WRITE_OP_BEGIN,
+    EVFS_SUPER_UPDATE,
+    EVFS_DIRENT_UPDATE,
+    
+    EVFS_EXTENT_ALLOC,
+    EVFS_INODE_ALLOC,
+
+    EVFS_EXTENT_WRITE,
+    EVFS_INODE_WRITE,
+
+    // Note: the identifier for dirents is its filename + parent inode
+    EVFS_DIRENT_ADD,
+    EVFS_DIRENT_REMOVE,
+    EVFS_DIRENT_RENAME, // unlike update, this *keeps* content but changes id
+
+    // inode-specific operations
+    EVFS_INODE_MAP,
+
+    EVFS_WRITE_OP_END,
+};
+
+struct evfs_opentry {
+    int code;
+    int id;
+    void * data;
+};
+
+struct evfs_atomic_action_param {
+    int count;
+    int capacity;
+    int errop;
+    struct evfs_opentry item[];
+};
+
+// not sure where this goes
+
+struct evfs_ext_write_op {
+    u32 addr;
+    unsigned long length;
+    char *data;
+};
 
 /*
  * evfs ioctl commands
@@ -135,6 +216,7 @@ struct __evfs_meta_iter {
  * TODO (jsun): clean-up everything. only EVFS_ACTION should be kept.
  *
  */
+ 
 #define FS_IOC_INODE_LOCK _IOR('f', 64, long)
 #define FS_IOC_INODE_UNLOCK _IOR('f', 65, long)
 #define FS_IOC_EXTENT_ALLOC _IOWR('f', 66, struct evfs_extent_alloc_op)
@@ -159,4 +241,5 @@ struct __evfs_meta_iter {
 #define FS_IOC_META_ITER _IOR('f', 86, struct evfs_iter_ops)
 #define FS_IOC_ATOMIC_ACTION _IOWR('f', 96, struct evfs_atomic_action_param)
 
-#endif // EVFSPRIV_H_
+#endif // UAPI_EVFSCTL_H_
+
