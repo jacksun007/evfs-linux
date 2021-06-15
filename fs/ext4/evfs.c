@@ -278,19 +278,6 @@ ext4_evfs_inode_info(struct super_block *sb, void __user * arg)
 
 	vfs_to_evfs_inode(vfs_inode, &i);
 
-	ext4_msg(sb, KERN_ERR,
-			"no : %ld\n"
-		 	"mode : %d\n"
-			"uid : %d\n"
-			"gid : %d\n"
-			"refcount : %d\n",
-		vfs_inode->i_ino,
-		vfs_inode->i_mode,
-		vfs_inode->i_uid.val,
-		vfs_inode->i_gid.val,
-		atomic_read(&vfs_inode->i_count));
-
-
 	iput(vfs_inode);
 	if (copy_to_user((struct evfs_inode __user *) arg, &i, sizeof(i)))
 		return -EFAULT;
@@ -320,8 +307,7 @@ ext4_evfs_inode_set(struct super_block * sb, void __user * arg)
 }
 
 static long
-ext4_evfs_inode_alloc(struct file *filp, struct super_block *sb,
-		unsigned long arg)
+ext4_evfs_inode_alloc(struct super_block * sb, void __user * arg)
 {
 	struct inode *new_inode;
 	struct evfs_inode i;
@@ -960,7 +946,7 @@ ext4_evfs_extent_write(struct file *filp, struct super_block *sb, unsigned long 
 }
 
 static long
-ext4_evfs_sb_get(struct super_block *sb, unsigned long arg)
+ext4_evfs_sb_get(struct super_block * sb, void __user * arg)
 {
 	struct evfs_super_block evfs_sb;
 
@@ -978,6 +964,77 @@ ext4_evfs_sb_get(struct super_block *sb, unsigned long arg)
 }
 
 static long
+ext4_evfs_inode_lock(struct super_block * sb, struct evfs_lockable * lkb)
+{
+	struct inode * inode = ext4_iget_normal(sb, lkb->object_id);
+	if (IS_ERR(inode))
+		return -ENOENT;
+
+	if (lkb->exclusive)
+		inode_lock(inode);
+	else
+		inode_lock_shared(inode);
+
+	iput(inode);
+	return 0;
+}
+
+static void
+ext4_evfs_inode_unlock(struct super_block * sb, struct evfs_lockable * lkb)
+{
+	struct inode * inode = ext4_iget_normal(sb, lkb->object_id);
+	if (IS_ERR(inode)) {
+		panic("trying to unlock inode %lu but it does not exist!\n",
+			lkb->object_id);
+		return;
+	}
+
+	if (lkb->exclusive)
+		inode_unlock(inode);
+	else
+		inode_unlock_shared(inode);
+
+	iput(inode);
+}
+
+static long
+ext4_evfs_lock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable)
+{
+	long err = 0;
+
+	switch (lockable->type) {
+	case EVFS_TYPE_INODE:
+		err = ext4_evfs_inode_lock(aa->sb, lockable);
+		break;
+	case EVFS_TYPE_SUPER:
+	case EVFS_TYPE_EXTENT:
+	case EVFS_TYPE_DIRENT:
+	case EVFS_TYPE_METADATA:
+		break;
+	default:
+		printk("evfs: cannot lock object type %u\n", lockable->type);
+	}
+	return err;
+}
+
+static void
+ext4_evfs_unlock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable)
+{
+	switch (lockable->type) {
+	case EVFS_TYPE_INODE:
+		ext4_evfs_inode_unlock(aa->sb, lockable);
+		break;
+	case EVFS_TYPE_SUPER:
+	case EVFS_TYPE_EXTENT:
+	case EVFS_TYPE_DIRENT:
+	case EVFS_TYPE_METADATA:
+		break;
+	default:
+		printk("evfs: cannot lock object type %u\n", lockable->type);
+	}
+}
+
+static long
 ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 {
 	long err = -1;
@@ -986,16 +1043,43 @@ ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 	case EVFS_INODE_INFO:
 		err = ext4_evfs_inode_info(aa->sb, op->data);
 		break;
+	case EVFS_SUPER_INFO:
+		err = ext4_evfs_sb_get(aa->sb, op->data);
+		break;
+	case EVFS_DIRENT_INFO:
+		break;
+	case EVFS_EXTENT_READ:
+		break;
+	case EVFS_INODE_READ:
+		err = -ENOSYS;
+		break;
 	case EVFS_INODE_UPDATE:
 		err = ext4_evfs_inode_set(aa->sb, op->data);
 		break;
+	case EVFS_SUPER_UPDATE:
+	case EVFS_DIRENT_UPDATE:
+	case EVFS_EXTENT_ALLOC:
+	case EVFS_INODE_ALLOC:
+		err = ext4_evfs_inode_alloc(aa->sb, op->data);
+		break;
+	case EVFS_EXTENT_WRITE:
+	case EVFS_INODE_WRITE:
+	case EVFS_DIRENT_ADD:
+	case EVFS_DIRENT_REMOVE:
+	case EVFS_DIRENT_RENAME:
+	case EVFS_INODE_MAP:
+		err = -ENOSYS;
+		break;
 	default:
-		panic("not implemented. should not get here\n");
+		printk("evfs: unknown opcode %d\n", op->code);
+		err = -ENOSYS;
 	}
 	return err;
 }
 
 struct evfs_atomic_op ext4_evfs_atomic_ops = {
+	.lock = ext4_evfs_lock,
+	.unlock = ext4_evfs_unlock,
 	.execute = ext4_evfs_execute,
 };
 
@@ -1010,38 +1094,12 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	switch (cmd) {
 	case FS_IOC_ATOMIC_ACTION:
 		return evfs_run_atomic_action(sb, &ext4_evfs_atomic_ops, (void *) arg);
-	case FS_IOC_INODE_LOCK:
-		if (get_user(ino_nr, (unsigned long __user *) arg))
-			return -EFAULT;
-		inode = ext4_iget(sb, ino_nr);
-		if (IS_ERR(inode)) {
-			ext4_msg(sb, KERN_ERR, "iget failed during evfs");
-			return PTR_ERR(inode);
-		}
-
-		err = mnt_want_write_file(filp);
-		if (err)
-			return err;
-		inode_lock(inode);
-		return 0;
-	case FS_IOC_INODE_UNLOCK:
-		if (get_user(ino_nr, (unsigned long __user *) arg))
-			return -EFAULT;
-		inode = ext4_iget(sb, ino_nr);
-		if (IS_ERR(inode)) {
-			ext4_msg(sb, KERN_ERR, "iget failed during evfs");
-			return PTR_ERR(inode);
-		}
-
-		inode_unlock(inode);
-		mnt_drop_write_file(filp);
-		break;
 	case FS_IOC_DIRENT_ADD:
 		return dirent_add(filp, sb, arg);
 	case FS_IOC_DIRENT_REMOVE:
 		return dirent_remove(filp, sb, arg);
 	case FS_IOC_INODE_ALLOC:
-		return ext4_evfs_inode_alloc(filp, sb, arg);
+		return ext4_evfs_inode_alloc(sb, (void *) arg);
 	case FS_IOC_INODE_FREE:
 		return ext4_evfs_inode_free(filp, sb, arg);
 	case FS_IOC_EXTENT_WRITE:
@@ -1067,7 +1125,7 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case FS_IOC_EXTENT_ITERATE:
 		return ext4_evfs_extent_iter(filp, sb, arg);
 	case FS_IOC_SUPER_GET:
-		return ext4_evfs_sb_get(sb, arg);
+		return ext4_evfs_sb_get(sb, (void *) arg);
 	}
 
 	return -ENOTTY;
