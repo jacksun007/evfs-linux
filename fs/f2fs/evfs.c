@@ -425,8 +425,8 @@ f2fs_evfs_extent_alloc(struct file *filp,
 	evfs_ext = ext_op.extent;
 
 	if (ext_op.flags == EVFS_EXTENT_ALLOC_FIXED) {
-		ret = f2fs_extent_check(sbi, evfs_ext.start,
-					evfs_ext.length, EVFS_ANY);
+		ret = f2fs_extent_check(sbi, evfs_ext.addr,
+					evfs_ext.len, EVFS_ANY);
 		if (ret < 0) {
 			ret = -ENOSPC;
 			goto out;
@@ -434,7 +434,7 @@ f2fs_evfs_extent_alloc(struct file *filp,
 		use_hint = 1;
 	}
 
-	ret = reserve_extents(sbi, evfs_ext.start, evfs_ext.length, use_hint);
+	ret = reserve_extents(sbi, evfs_ext.addr, evfs_ext.len, use_hint);
 
 out:
 	f2fs_balance_fs(sbi, true);
@@ -453,7 +453,7 @@ f2fs_evfs_extent_free(struct file *filp, struct super_block *sb, unsigned long a
 				sizeof(struct evfs_extent)))
 		return -EFAULT;
 
-	ret = f2fs_extent_check(sbi, evfs_ext.start, evfs_ext.length, EVFS_ANY);
+	ret = f2fs_extent_check(sbi, evfs_ext.addr, evfs_ext.len, EVFS_ANY);
 	if (ret < 0) {
 		f2fs_msg(sb, KERN_ERR, "f2fs_evfs_extent_free: "
 				"invalid extent range");
@@ -464,8 +464,8 @@ f2fs_evfs_extent_free(struct file *filp, struct super_block *sb, unsigned long a
 		return -ENOMEM;
 	}
 
-	start = evfs_ext.start;
-	end = start + evfs_ext.length;
+	start = evfs_ext.addr;
+	end = start + evfs_ext.len;
 	for (blk_addr = start; blk_addr < end; blk_addr++) {
 		invalidate_blocks(sbi, blk_addr);
 	}
@@ -484,8 +484,8 @@ f2fs_evfs_extent_active(struct file *filp, struct super_block *sb, unsigned long
 				sizeof (struct evfs_extent_query)))
 		return -EFAULT;
 
-	ret = f2fs_extent_check(sbi, evfs_query.extent.start,
-			evfs_query.extent.length, evfs_query.query);
+	ret = f2fs_extent_check(sbi, evfs_query.extent.addr,
+			evfs_query.extent.len, evfs_query.query);
 
 	if (ret < 0) {
 		f2fs_msg(sb, KERN_ERR, "f2fs_evfs_extent_active: "
@@ -551,8 +551,8 @@ f2fs_evfs_extent_iter(struct file *filp, struct super_block *sb, unsigned long a
 	/* Iterate through all segments */
 	for (; segno < max_segno; segno++) {
 		se = get_seg_entry(sbi, segno);
-		param.length = 0;
-		param.start = 0;
+		param.len = 0;
+		param.addr = 0;
 
 		/* We only care about data blocks */
 		if (!IS_DATASEG(se->type))
@@ -563,35 +563,35 @@ f2fs_evfs_extent_iter(struct file *filp, struct super_block *sb, unsigned long a
 		 *       single segment. Maybe change this? */
 		for(; blkoff < max_blkoff; blkoff++) {
 			if (!(f2fs_test_bit(blkoff, se->cur_valid_map))) {
-				if (!param.length) {
-					param.start = START_BLOCK(sbi, segno)
+				if (!param.len) {
+					param.addr = START_BLOCK(sbi, segno)
 							+ blkoff;
-					param.length = 1;
+					param.len = 1;
 				} else {
-					++param.length;
+					++param.len;
 				}
-			} else if (param.length) {
+			} else if (param.len) {
 				if (evfs_copy_param(&iter, &param,
 					sizeof(struct evfs_extent))) {
-					ret = (param.start + param.length
+					ret = (param.addr + param.len
 							>= MAX_BLKADDR(sbi))
 						? 0 : 1;
 					goto out;
 				}
-				param.start = 0;
-				param.length = 0;
+				param.addr = 0;
+				param.len = 0;
 			}
 		}
 
-		if (param.length) {
+		if (param.len) {
 			if (evfs_copy_param(&iter, &param,
 				sizeof(struct evfs_extent))) {
-				ret = (param.start + param.length
+				ret = (param.addr + param.len
 						>= MAX_BLKADDR(sbi)) ? 0 : 1;
 				goto out;
 			}
-			param.start = 0;
-			param.length = 0;
+			param.addr = 0;
+			param.len = 0;
 		}
 		blkoff = 0;
 	}
@@ -607,13 +607,13 @@ long
 f2fs_evfs_inode_map(struct file *filp, struct super_block *sb, unsigned long arg)
 {
 	struct f2fs_sb_info *sbi = F2FS_SB(sb);
-	struct evfs_imap evfs_i;
+	struct __evfs_imap evfs_i;
 	struct inode *inode;
 	struct f2fs_map_blocks map = { .m_next_pgofs = NULL };
 	int ret;
 
-	if (copy_from_user(&evfs_i, (struct evfs_imap __user *) arg,
-				sizeof(struct evfs_imap)))
+	if (copy_from_user(&evfs_i, (struct __evfs_imap __user *) arg,
+				sizeof(struct __evfs_imap)))
 		return -EFAULT;
 
 	inode = f2fs_iget(sb, evfs_i.ino_nr);
@@ -675,12 +675,12 @@ out:
 long
 f2fs_evfs_inode_unmap(struct file *filp, struct super_block *sb, unsigned long arg)
 {
-	struct evfs_imap evfs_i;
+	struct __evfs_imap evfs_i;
 	struct inode *inode;
 	block_t blk_addr, start, len;
 
-	if (copy_from_user(&evfs_i, (struct evfs_imap __user *) arg,
-				sizeof(struct evfs_imap)))
+	if (copy_from_user(&evfs_i, (struct __evfs_imap __user *) arg,
+				sizeof(struct __evfs_imap)))
 		return -EFAULT;
 
 	inode = f2fs_iget(sb, evfs_i.ino_nr);
@@ -1080,9 +1080,9 @@ f2fs_evfs_sb_get(struct super_block *sb, unsigned long arg)
 	 * (there exists in-memory extent struct, which does not affect us),
 	 * just return the maximum possible # of blocks for a given inode.
 	 */
-	evfs_sb.max_extent = sb->s_maxbytes >> PAGE_SHIFT;
+	evfs_sb.max_extent_size = sb->s_maxbytes >> PAGE_SHIFT;
 	evfs_sb.max_bytes = sb->s_maxbytes;
-	evfs_sb.page_size = PAGE_SIZE;
+	evfs_sb.block_size = PAGE_SIZE;
 	evfs_sb.root_ino = F2FS_ROOT_INO(sbi);
 
 	if (copy_to_user((struct evfs_super_block __user *) arg, &evfs_sb,

@@ -1,12 +1,5 @@
-/*
- * evfs.h
- *
- * Userspace Evfs library API
- *
- */
-  
-#ifndef EVFS_H
-#define EVFS_H
+#ifndef EVFSPUB_H_
+#define EVFSPUB_H_
 
 typedef unsigned long long u64;
 typedef unsigned int u32;
@@ -70,6 +63,22 @@ struct evfs_inode {
     };
 };
 
+struct evfs_metadata {
+    unsigned long blkaddr;
+    unsigned long size; // Block-level granularity
+    unsigned long owner; // TODO: Does it make sense for this to be just inode? Maybe optional?
+    int loc_type;
+    int type;
+
+    /* TODO: In order to be able to move metadata, the user needs
+     *       some idea of where they can move the data to. Returning
+     *       this "meta region" should help with that, but not entirely
+     *       sure if it makes sense to be in this struct.
+     */
+    unsigned long region_start;
+    unsigned long region_len;
+};
+
 // mapping entry
 struct evfs_imentry {
     u32 inlined;    // this map entry is inlined (e.g., tail-packed)
@@ -87,15 +96,15 @@ struct evfs_imap {
 // TODO: put ALL the possible comparable fields here
 enum evfs_field {
     EVFS_FIELD_INVALID = 0,
-    
+
     EVFS_INODE_FIELD_BEGIN,
-    
+
     EVFS_INODE_MTIME_SEC = EVFS_INODE_FIELD_BEGIN,
     EVFS_INODE_MTIME_USEC,
-    
+
     EVFS_INODE_FIELD_END,
 
-    // TODO: add fields of other objects    
+    // TODO: add fields of other objects
 };
 
 // basic open/close for evfs device
@@ -135,6 +144,4 @@ int atomic_const_equal(struct evfs_atomic * aa, int id, int field, u64 rhs);
 int atomic_execute(struct evfs_atomic * aa);
 void atomic_end(struct evfs_atomic * aa);
 
-
-#endif
-
+#endif // EVFSPUB_H_

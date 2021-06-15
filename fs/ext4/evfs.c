@@ -308,7 +308,7 @@ ext4_evfs_inode_set(struct super_block * sb, void __user * arg)
 
 	inode = ext4_iget_normal(sb, evfs_i.ino_nr);
 	if (IS_ERR(inode)) {
-		ext4_msg(sb, KERN_ERR, "Inode %lu not found", evfs_i.ino_nr);
+		ext4_msg(sb, KERN_ERR, "Inode %llu not found", evfs_i.ino_nr);
 		return PTR_ERR(inode);
 	}
 
@@ -384,7 +384,7 @@ static long
 ext4_evfs_inode_map(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
-	struct evfs_imap evfs_i;
+	struct __evfs_imap evfs_i;
 	struct inode *inode;
 	struct extent_status es;
 	struct ext4_free_extent fex;
@@ -395,8 +395,8 @@ ext4_evfs_inode_map(struct file *filp, struct super_block *sb,
 	ext4_grpblk_t off_block;
 	int err = 0;
 
-	if (copy_from_user(&evfs_i, (struct evfs_imap __user *) arg,
-				sizeof(struct evfs_imap)))
+	if (copy_from_user(&evfs_i, (struct __evfs_imap __user *) arg,
+				sizeof(struct __evfs_imap)))
 		return -EFAULT;
 
 	if (unlikely(evfs_i.length > INT_MAX)) {
@@ -488,13 +488,13 @@ static long
 ext4_evfs_inode_unmap(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
-	struct evfs_imap evfs_i;
+	struct __evfs_imap evfs_i;
 	struct inode *inode;
 	ext4_lblk_t start, end;
 	int err = 0;
 
-	if (copy_from_user(&evfs_i, (struct evfs_imap __user *) arg,
-				sizeof(struct evfs_imap)))
+	if (copy_from_user(&evfs_i, (struct __evfs_imap __user *) arg,
+				sizeof(struct __evfs_imap)))
 		return -EFAULT;
 
 	start = evfs_i.log_blkoff;
@@ -636,13 +636,13 @@ ext4_evfs_extent_active(struct file *filp, struct super_block *sb,
 				sizeof(struct evfs_extent_query)))
 		return -EFAULT;
 
-	block = op.extent.start;
+	block = op.extent.addr;
 
 	ext4_get_group_no_and_offset(sb, block, &group, &off_block);
 
 	fex.fe_group = group;
 	fex.fe_start = off_block;
-	fex.fe_len = op.extent.length;
+	fex.fe_len = op.extent.len;
 
 	bitmap_bh = ext4_read_block_bitmap(sb, group);
 	if (IS_ERR(bitmap_bh)) {
@@ -686,13 +686,13 @@ ext4_evfs_extent_free(struct file *filp, struct super_block *sb,
 				sizeof(struct evfs_extent)))
 		return -EFAULT;
 
-	block = op.start;
+	block = op.addr;
 
 	ext4_get_group_no_and_offset(sb, block, &group, &off_block);
 
 	fex.fe_start = off_block;
 	fex.fe_group = group;
-	fex.fe_len = op.length;
+	fex.fe_len = op.len;
 
 	/*
 	 * NOTE (kyokeun): This uses the older method of reading the disk bitmap
@@ -783,17 +783,17 @@ ext4_evfs_extent_alloc(struct file *filp, struct super_block *sb,
 		return -EFAULT;
 	op = ext_op.extent;
 
-	ext4_get_group_no_and_offset(sb, op.start, &group, &off_block);
+	ext4_get_group_no_and_offset(sb, op.addr, &group, &off_block);
 
 	if (max_groups < group) {
-		ext4_error(sb, "Given physical address (%lu) out of range", op.start);
+		ext4_error(sb, "Given physical address (%llu) out of range", op.addr);
 		return -EINVAL;
 	}
 
 	ac.ac_sb = sb;
 	ac.ac_g_ex.fe_group = group;
 	ac.ac_g_ex.fe_start = off_block;
-	ac.ac_g_ex.fe_len = op.length;
+	ac.ac_g_ex.fe_len = op.len;
 	ac.ac_found = 0;
 	ac.ac_status = AC_STATUS_CONTINUE;
 	ac.ac_flags = EXT4_MB_HINT_TRY_GOAL;
@@ -886,8 +886,8 @@ ext4_evfs_extent_iter(struct file *filp, struct super_block *sb,
 			int is_set = mb_test_bit(off_block, bh->b_data);
 			if (!is_set && !start_marked) {
 				start_marked = 1;
-				param.start = (group * EXT4_BLOCKS_PER_GROUP(sb)) + off_block;
-				param.length = 1;
+				param.addr = (group * EXT4_BLOCKS_PER_GROUP(sb)) + off_block;
+				param.len = 1;
 			} else if (is_set && start_marked) {
 				start_marked = 0;
 				if (evfs_copy_param(&iter, &param,
@@ -896,8 +896,8 @@ ext4_evfs_extent_iter(struct file *filp, struct super_block *sb,
 					goto cleanup;
 				}
 			} else if (start_marked) {
-				param.length++;
-				if (param.length == INT_MAX) {
+				param.len++;
+				if (param.len == INT_MAX) {
 					start_marked = 0;
 					if (evfs_copy_param(&iter, &param,
 								sizeof(struct evfs_extent))) {
@@ -965,9 +965,9 @@ ext4_evfs_sb_get(struct super_block *sb, unsigned long arg)
 	struct evfs_super_block evfs_sb;
 
 	evfs_sb.block_count = EXT4_BLOCKS_PER_GROUP(sb) * ext4_get_groups_count(sb);
-	evfs_sb.max_extent = EXT_INIT_MAX_LEN;
+	evfs_sb.max_extent_size = EXT_INIT_MAX_LEN;
 	evfs_sb.max_bytes = sb->s_maxbytes;
-	evfs_sb.page_size = PAGE_SIZE;
+	evfs_sb.block_size = PAGE_SIZE;
 	evfs_sb.root_ino = EXT4_ROOT_INO;
 
 	if (copy_to_user((struct evfs_super_block __user *) arg, &evfs_sb,
