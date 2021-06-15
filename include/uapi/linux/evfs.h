@@ -1,3 +1,10 @@
+/*
+ * uapi/linux/evfs.h
+ *
+ * userspace EVFS API of the kernel
+ *
+ */
+
 #ifndef _UAPI_LINUX_EVFS_H
 #define _UAPI_LINUX_EVFS_H
 
@@ -45,9 +52,9 @@ struct evfs_extent_query {
 
 /* TODO: compact this structure */
 struct evfs_inode_property {
-    int inlined;        // does inode have inlined data
     int refcount;       // link count
     long blockcount;    // number of blocks used
+    long inlined_bytes; // bytes not in data blocks
 };
 
 /* TODO: replace with kernel's timespec? */
@@ -355,9 +362,6 @@ struct evfs_atomic_op {
 #define FS_IOC_META_ITER _IOR('f', 86, struct evfs_iter_ops)
 #define FS_IOC_ATOMIC_ACTION _IOWR('f', 96, struct evfs_atomic_action_param)
 
-// fs/evfs.c
-long evfs_run_atomic_action(struct super_block * sb, struct evfs_atomic_op *fop,
-                           void * arg);
 
 #endif /* _UAPI_LINUX_EVFS_H */
 

@@ -37,7 +37,6 @@
 
 #include <asm/byteorder.h>
 #include <uapi/linux/fs.h>
-#include <uapi/linux/evfs.h>
 
 struct backing_dev_info;
 struct bdi_writeback;
@@ -226,7 +225,7 @@ struct iattr {
  */
 #define FILESYSTEM_MAX_STACK_DEPTH 2
 
-/**
+/** 
  * enum positive_aop_returns - aop return codes with specific semantics
  *
  * @AOP_WRITEPAGE_ACTIVATE: Informs the caller that page writeback has
@@ -236,7 +235,7 @@ struct iattr {
  * 			    be a candidate for writeback again in the near
  * 			    future.  Other callers must be careful to unlock
  * 			    the page if they get this return.  Returned by
- * 			    writepage();
+ * 			    writepage(); 
  *
  * @AOP_TRUNCATED_PAGE: The AOP method that was handed a locked page has
  *  			unlocked it and the page might have been truncated.
@@ -905,8 +904,8 @@ static inline struct file *get_file(struct file *f)
 
 #define	MAX_NON_LFS	((1UL<<31) - 1)
 
-/* Page cache limit. The filesystems should put that into their s_maxbytes
-   limits, otherwise bad things can happen in VM. */
+/* Page cache limit. The filesystems should put that into their s_maxbytes 
+   limits, otherwise bad things can happen in VM. */ 
 #if BITS_PER_LONG==32
 #define MAX_LFS_FILESIZE	((loff_t)ULONG_MAX << PAGE_SHIFT)
 #elif BITS_PER_LONG==64
@@ -2043,7 +2042,7 @@ int sync_inode_metadata(struct inode *inode, int wait);
 struct file_system_type {
 	const char *name;
 	int fs_flags;
-#define FS_REQUIRES_DEV		1
+#define FS_REQUIRES_DEV		1 
 #define FS_BINARY_MOUNTDATA	2
 #define FS_HAS_SUBTYPE		4
 #define FS_USERNS_MOUNT		8	/* Can be mounted by userns root */
@@ -2783,11 +2782,10 @@ extern int kernel_read_file_from_fd(int, void **, loff_t *, loff_t,
 extern ssize_t kernel_write(struct file *, const char *, size_t, loff_t);
 extern ssize_t __kernel_write(struct file *, const char *, size_t, loff_t *);
 extern struct file * open_exec(const char *);
-
+ 
 /* fs/dcache.c -- generic fs support functions */
 extern bool is_subdir(struct dentry *, struct dentry *);
 extern bool path_is_under(const struct path *, const struct path *);
-extern void d_drop_entry_in_dir(struct inode *, struct qstr *);
 
 extern char *file_path(struct file *, char *, int);
 
@@ -2916,57 +2914,6 @@ extern int nonseekable_open(struct inode * inode, struct file * filp);
 #ifdef CONFIG_BLOCK
 typedef void (dio_submit_t)(struct bio *bio, struct inode *inode,
 			    loff_t file_offset);
-
-/* fs/evfs.c */
-extern ssize_t evfs_page_read_iter(struct inode *, loff_t *, struct iov_iter *,
-		ssize_t, struct page *(*)(struct address_space *, pgoff_t));
-extern ssize_t evfs_perform_write(struct super_block *,
-		struct iov_iter *, pgoff_t);
-extern int evfs_copy_param(struct evfs_iter_ops *, const void *, int);
-
-static inline void evfs_timeval_to_timespec(struct evfs_timeval *in,
-		struct timespec *out)
-{
-	out->tv_nsec = in->tv_usec * 1000000;
-	out->tv_sec = in->tv_sec;
-}
-
-static inline void evfs_timespec_to_timeval(struct timespec *in,
-		struct evfs_timeval *out)
-{
-	out->tv_usec = in->tv_nsec / 1000000;
-	out->tv_sec = in->tv_sec;
-}
-
-static inline void
-vfs_to_evfs_inode(struct inode *inode, struct evfs_inode *evfs_i)
-{
-	evfs_i->ino_nr = inode->i_ino;
-	evfs_i->mode = inode->i_mode;
-	evfs_i->flags = inode->i_flags;
-	evfs_timespec_to_timeval(&inode->i_atime, &evfs_i->atime);
-	evfs_timespec_to_timeval(&inode->i_ctime, &evfs_i->ctime);
-	evfs_timespec_to_timeval(&inode->i_mtime, &evfs_i->mtime);
-	evfs_i->gid = i_gid_read(inode);
-	evfs_i->uid = i_uid_read(inode);
-	evfs_i->bytesize = i_size_read(inode);
-	evfs_i->_prop.blockcount = inode->i_blocks;
-	evfs_i->_prop.refcount = atomic_read(&inode->i_count);
-	evfs_i->_prop.inlined = 0; /* FS-specific code should take care of it */
-}
-
-static inline void
-evfs_to_vfs_inode(struct evfs_inode *evfs_i, struct inode *inode)
-{
-	inode->i_mode = evfs_i->mode;
-	inode->i_flags = evfs_i->flags;
-	inode->i_size = evfs_i->bytesize;
-	evfs_timeval_to_timespec(&evfs_i->atime, &inode->i_atime);
-	evfs_timeval_to_timespec(&evfs_i->ctime, &inode->i_ctime);
-	evfs_timeval_to_timespec(&evfs_i->mtime, &inode->i_mtime);
-	i_uid_write(inode, evfs_i->uid);
-	i_gid_write(inode, evfs_i->gid);
-}
 
 enum {
 	/* need locking between buffered and direct access */

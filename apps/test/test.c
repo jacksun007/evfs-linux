@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
+#include <time.h>
 #include <evfs.h>
 
 int usage(char * prog)
@@ -17,6 +18,37 @@ int usage(char * prog)
     fprintf(stderr, "  DEV: device of the file system.\n");
     fprintf(stderr, "  NUM: inode number\n");
     return 1;
+}
+
+// NOTE: not thread-safe!
+const char * timevalstr(struct evfs_timeval * tv)
+{
+    static char buf[256];
+    struct tm * loctime;
+    unsigned len;
+    
+    loctime = localtime((const time_t *)&tv->tv_sec);
+    len = strftime(buf, sizeof(buf), "%F %T.", loctime);
+    snprintf(buf + len, sizeof(buf) - len, "%06llu", tv->tv_usec);
+    return buf;
+}
+
+// TODO: complete me
+void print_inode(struct evfs_inode * inode)
+{
+    printf("ino_nr: %llu\n", inode->ino_nr);
+    printf("atime: %s\n", timevalstr(&inode->atime));
+    printf("ctime: %s\n", timevalstr(&inode->ctime));
+    printf("mtime: %s\n", timevalstr(&inode->mtime));
+    printf("otime: %s\n", timevalstr(&inode->otime));
+    printf("uid: %u\n", inode->uid);
+    printf("gid: %u\n", inode->gid);
+    printf("mode: 0x%X\n", inode->mode);
+    printf("flags: 0x%X\n", inode->flags);
+    printf("bytesize: %llu\n", inode->bytesize);
+    printf("refcount: %u\n", inode->prop.refcount);
+    printf("blockcount: %llu\n", inode->prop.blockcount);
+    printf("inlined_bytes: %llu\n", inode->prop.inlined_bytes);
 }
 
 int main(int argc, char * argv[])
@@ -44,7 +76,7 @@ int main(int argc, char * argv[])
             inode.ino_nr, strerror(-ret));
     }
     else {
-        printf("size of inode %llu is %llu\n", inode.ino_nr, inode.bytesize);
+        print_inode(&inode);
     }
        
     evfs_close(evfs);

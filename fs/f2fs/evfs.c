@@ -12,7 +12,7 @@
  * published by the Free Software Foundation.
  */
 
-#include <linux/fs.h>
+#include <linux/evfs.h>
 #include <linux/f2fs_fs.h>
 #include <linux/capability.h>
 #include <linux/time.h>
@@ -20,7 +20,6 @@
 #include <linux/mount.h>
 #include <linux/file.h>
 #include <linux/random.h>
-#include <linux/evfs.h>
 #include <linux/swap.h>
 #include <asm/uaccess.h>
 #include <linux/quotaops.h>
@@ -945,7 +944,8 @@ f2fs_evfs_inode_info(struct super_block *sb, void __user * arg)
 
     evfs_i.ino_nr = ino_nr;
 	vfs_to_evfs_inode(inode, &evfs_i);
-	evfs_i._prop.inlined = f2fs_has_inline_data(inode);
+	evfs_i._prop.inlined_bytes = f2fs_has_inline_data(inode) ?
+	    evfs_i.bytesize : 0;
 
 	if (copy_to_user((struct evfs_inode __user *) arg, &evfs_i, sizeof(evfs_i)))
 		return -EFAULT;
