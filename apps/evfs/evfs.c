@@ -129,9 +129,7 @@ void iter_end(evfs_iter_t * it)
 
 int super_info(evfs_t * evfs, struct evfs_super_block * sb)
 {
-    (void)evfs;
-    (void)sb;
-    return -EINVAL;
+    return evfs_operation(evfs, EVFS_SUPER_INFO, sb);
 }
 
 int extent_alloc(evfs_t * evfs, u64 pa, u64 len, int flags)

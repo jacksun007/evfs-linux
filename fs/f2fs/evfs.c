@@ -1069,8 +1069,9 @@ f2fs_evfs_inode_stat(struct super_block *sb, unsigned long arg)
 
 }
 
+static
 long
-f2fs_evfs_sb_get(struct super_block *sb, unsigned long arg)
+f2fs_evfs_sb_get(struct super_block *sb, void __user * arg)
 {
 	struct evfs_super_block evfs_sb;
 	struct f2fs_sb_info *sbi = F2FS_SB(sb);
@@ -1080,13 +1081,13 @@ f2fs_evfs_sb_get(struct super_block *sb, unsigned long arg)
 	 * (there exists in-memory extent struct, which does not affect us),
 	 * just return the maximum possible # of blocks for a given inode.
 	 */
-	evfs_sb.max_extent_size = sb->s_maxbytes >> PAGE_SHIFT;
+	evfs_sb.max_extent_size = 1 << sbi->log_blocks_per_seg;
 	evfs_sb.max_bytes = sb->s_maxbytes;
-	evfs_sb.block_size = PAGE_SIZE;
+	evfs_sb.block_count = 1 << sbi->user_block_count;
 	evfs_sb.root_ino = F2FS_ROOT_INO(sbi);
+	evfs_sb.block_size = 1 << sbi->log_blocksize;
 
-	if (copy_to_user((struct evfs_super_block __user *) arg, &evfs_sb,
-				sizeof(struct evfs_super_block)))
+	if (copy_to_user(arg, &evfs_sb, sizeof(struct evfs_super_block)))
 		return -EFAULT;
 	return 0;
 }
@@ -1300,6 +1301,13 @@ f2fs_evfs_lock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable)
     case EVFS_TYPE_INODE:
         err = f2fs_evfs_inode_lock(aa->sb, lockable);
         break;
+    case EVFS_TYPE_SUPER:
+        /* nothing needs to be done here */
+        break;
+    case EVFS_TYPE_EXTENT:
+    case EVFS_TYPE_DIRENT:
+    case EVFS_TYPE_METADATA:
+        /* TODOs */
     default:
         printk("evfs: cannot lock object type %u\n", lockable->type);
     }
@@ -1315,6 +1323,13 @@ f2fs_evfs_unlock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable
     case EVFS_TYPE_INODE:
         f2fs_evfs_inode_unlock(aa->sb, lockable);
         break;
+    case EVFS_TYPE_SUPER:
+        /* nothing needs to be done here */
+        break;
+    case EVFS_TYPE_EXTENT:
+    case EVFS_TYPE_DIRENT:
+    case EVFS_TYPE_METADATA:
+        /* TODOs */
     default:
         printk("evfs: cannot unlock object type %u\n", lockable->type);
     }
@@ -1330,11 +1345,32 @@ f2fs_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
     case EVFS_INODE_INFO:
         err = f2fs_evfs_inode_info(aa->sb, op->data);
         break;
+    case EVFS_SUPER_INFO:
+        err = f2fs_evfs_sb_get(aa->sb, op->data);
+        break;     
+    case EVFS_DIRENT_INFO:
+    case EVFS_EXTENT_READ:
+    case EVFS_INODE_READ:   
+        err = -ENOSYS;
+        break;
     case EVFS_INODE_UPDATE:
         err = f2fs_evfs_inode_set(aa->sb, op->data);
-        break;
+        break;    
+    case EVFS_SUPER_UPDATE:
+    case EVFS_DIRENT_UPDATE:
+    case EVFS_EXTENT_ALLOC:
+    case EVFS_INODE_ALLOC:
+    case EVFS_EXTENT_WRITE:
+    case EVFS_INODE_WRITE:
+    case EVFS_DIRENT_ADD:
+    case EVFS_DIRENT_REMOVE:
+    case EVFS_DIRENT_RENAME:
+    case EVFS_INODE_MAP:
+        err = -ENOSYS;
+        break;      
     default:
-        panic("not implemented. should not get here\n");
+        printk("evfs: unknown opcode %d\n", op->code);
+        err = -ENOSYS;
     }
     
     return err;
@@ -1371,10 +1407,6 @@ f2fs_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return f2fs_evfs_inode_free(filp, sb, arg);
 	case FS_IOC_INODE_STAT:
 		return f2fs_evfs_inode_stat(sb, arg);
-	case FS_IOC_INODE_GET:
-		return f2fs_evfs_inode_info(sb, (void *)arg);
-	case FS_IOC_INODE_SET:
-		return f2fs_evfs_inode_set(sb, (void *)arg);
 	case FS_IOC_INODE_READ:
 		return f2fs_evfs_inode_read(filp, sb, arg);
 	case FS_IOC_INODE_MAP:
@@ -1387,8 +1419,6 @@ f2fs_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return f2fs_evfs_dirent_add(filp, sb, arg);
 	case FS_IOC_DIRENT_REMOVE:
 		return f2fs_evfs_dirent_remove(filp, sb, arg);
-	case FS_IOC_SUPER_GET:
-		return f2fs_evfs_sb_get(sb, arg);
 	case FS_IOC_SUPER_SET:
 		return f2fs_evfs_sb_set(sb, arg);
 	case FS_IOC_META_MOVE:

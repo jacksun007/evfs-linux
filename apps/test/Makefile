@@ -7,8 +7,7 @@ EVFSDIR=../evfs
 EVFSLIB=$(EVFSDIR)/libevfs.a
 LOADLIBES=-levfs
 CFLAGS=-Wall -Wextra -Werror -I$(EVFSDIR)/include -L../evfs -ggdb
-PROG=iinfo iup
-
+PROG=iinfo iup sbinfo
 
 all: depend $(PROG)
 
@@ -16,6 +15,9 @@ iinfo: iinfo.o $(EVFSLIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
 
 iup: iup.o $(EVFSLIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
+
+sbinfo: sbinfo.o $(EVFSLIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
 
 $(EVFSLIB):

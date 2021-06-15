@@ -515,7 +515,7 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
 {
     int max_lockable = aa->nr_read + 2;
     int i;
-    long ret;
+    long ret = 0;
     
     struct evfs_lockable * lockable = kmalloc(
         max_lockable * sizeof(struct evfs_lockable), GFP_KERNEL | GFP_NOFS);
@@ -537,10 +537,32 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
         /* update as we support more evfs operations */
         switch (entry->code) {
             case EVFS_INODE_INFO:
+            case EVFS_INODE_READ: 
                 ret = evfs_add_inode_lockable(lockable, 0, entry->data);
                 break;
+            case EVFS_SUPER_INFO:
+                evfs_add_lockable(lockable, EVFS_TYPE_SUPER, 0, 0);
+                break;     
+            case EVFS_DIRENT_INFO:
+            case EVFS_EXTENT_READ:
+                ret = -ENOSYS;
+                break;    
             case EVFS_INODE_UPDATE:
+            case EVFS_INODE_WRITE:
+            case EVFS_INODE_MAP:
                 ret = evfs_add_inode_lockable(lockable, 1, entry->data);
+                break;
+            case EVFS_SUPER_UPDATE:
+                evfs_add_lockable(lockable, EVFS_TYPE_SUPER, 0, 0);
+                break;          
+            case EVFS_EXTENT_ALLOC:
+            case EVFS_INODE_ALLOC:
+            case EVFS_EXTENT_WRITE:
+            case EVFS_DIRENT_ADD:
+            case EVFS_DIRENT_REMOVE:
+            case EVFS_DIRENT_UPDATE:
+            case EVFS_DIRENT_RENAME:
+                ret = -ENOSYS;
                 break;
             default:
                 ret = -EINVAL;
