@@ -998,6 +998,13 @@ ext4_evfs_inode_unlock(struct super_block * sb, struct evfs_lockable * lkb)
 }
 
 static long
+ext4_evfs_prepare(struct evfs_atomic_action * aa, struct evfs_opentry * op)
+{
+    /* nothing needs to be pre-checked yet */
+    return 0;
+}
+
+static long
 ext4_evfs_lock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable)
 {
 	long err = 0;
@@ -1078,6 +1085,7 @@ ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 }
 
 struct evfs_atomic_op ext4_evfs_atomic_ops = {
+    .prepare = ext4_evfs_prepare,
 	.lock = ext4_evfs_lock,
 	.unlock = ext4_evfs_unlock,
 	.execute = ext4_evfs_execute,

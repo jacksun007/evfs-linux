@@ -355,8 +355,7 @@ evfs_destroy_atomic_action(struct evfs_atomic_action * aa)
 
 static 
 long
-evfs_new_atomic_action(struct evfs_atomic_action ** aap, 
-                       struct super_block * sb, void * arg)
+evfs_new_atomic_action(struct evfs_atomic_action ** aap, void * arg)
 {
     struct evfs_atomic_action_param param;
     struct evfs_atomic_action * aa;
@@ -389,21 +388,26 @@ evfs_new_atomic_action(struct evfs_atomic_action ** aap,
     }
     
     /* initialize rest of struct */
-    aa->sb = sb;
     aa->nr_read = 0;
     aa->nr_comp = 0;
     aa->write_op = NULL;
     aa->read_set = NULL;
     aa->comp_set = NULL;
     
+    /* these are set outside of this function */
+    aa->sb = NULL;
+    aa->fsop = NULL;
+    
     /* count number of comp/read ops */
     for (i = 0; i < param.count; i++) {
         struct evfs_opentry * entry = &aa->param.item[i];
         if (IS_EVFS_READ_OP(entry->code)) {
             aa->nr_read += 1;
+            printk("evfs: adding %d to read set\n", entry->code);
         }
         else if (IS_EVFS_COMP_OP(entry->code)) {
             aa->nr_comp += 1;
+            printk("evfs: adding %d to comp set\n", entry->code);
         }
         else {
             BUG_ON(!IS_EVFS_WRITE_OP(entry->code));
@@ -414,6 +418,7 @@ evfs_new_atomic_action(struct evfs_atomic_action ** aap,
             }
             
             aa->write_op = entry;
+            printk("evfs: adding %d to write set\n", entry->code);
         }
     }
     
@@ -464,7 +469,8 @@ fail:
 
 static
 void
-evfs_add_lockable(struct evfs_lockable * lk, int type, unsigned long id, int ex)
+evfs_add_lockable(struct evfs_lockable * lk, int type, unsigned long id, 
+                  int ex, unsigned long data)
 {
     struct evfs_lockable * lkb = lk;
     
@@ -477,6 +483,11 @@ evfs_add_lockable(struct evfs_lockable * lk, int type, unsigned long id, int ex)
             if (ex) {
                 lkb->exclusive = 1;
             }
+            
+            if (lkb->data != data) {
+                printk("evfs warning: duplicate object id with different "
+                       " data in lock set\n");
+            }
         
             return;
         }
@@ -488,6 +499,7 @@ evfs_add_lockable(struct evfs_lockable * lk, int type, unsigned long id, int ex)
     lkb->type = type;
     lkb->object_id = id;
     lkb->exclusive = ex;
+    lkb->data = data;
     
     /* invalidate last entry */
     lkb++;
@@ -505,7 +517,23 @@ evfs_add_inode_lockable(struct evfs_lockable * lk, int ex, void * arg)
         return -EFAULT;
     }
     
-    evfs_add_lockable(lk, EVFS_TYPE_INODE, ino_nr, ex);
+    evfs_add_lockable(lk, EVFS_TYPE_INODE, ino_nr, ex, 0);
+    return 0;
+}
+
+static
+long
+evfs_add_extent_group_lockable(struct evfs_lockable * lk, int ex, void * arg)
+{
+    struct evfs_extent extent;
+
+    long ret = copy_from_user(&extent, (struct evfs_extent __user *)arg, 
+                         sizeof(struct evfs_extent));
+    if (ret != 0) {
+        return -EFAULT;
+    }
+
+    evfs_add_lockable(lk, EVFS_TYPE_EXTENT_GROUP, extent.addr, ex, extent.len);
     return 0;
 }
 
@@ -534,15 +562,27 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
             continue;
         }
         
-        /* update as we support more evfs operations */
+        /* pre-check correctness of argument */
+        ret = aa->fsop->prepare(aa, entry);
+        if (ret < 0) {
+            printk("evfs: operation %d failed during prepare.\n", entry->id);
+            aa->param.errop = entry->id;
+            goto fail;
+        }
+        
+        ret = 0;
         switch (entry->code) {
             case EVFS_INODE_INFO:
             case EVFS_INODE_READ: 
+            case EVFS_INODE_ACTIVE:
                 ret = evfs_add_inode_lockable(lockable, 0, entry->data);
                 break;
             case EVFS_SUPER_INFO:
-                evfs_add_lockable(lockable, EVFS_TYPE_SUPER, 0, 0);
-                break;     
+                evfs_add_lockable(lockable, EVFS_TYPE_SUPER, 0, 0, 0);
+                break;
+            case EVFS_EXTENT_ACTIVE:
+                /* TODO: do we need to lock anything? */
+                break;
             case EVFS_DIRENT_INFO:
             case EVFS_EXTENT_READ:
                 ret = -ENOSYS;
@@ -553,9 +593,11 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
                 ret = evfs_add_inode_lockable(lockable, 1, entry->data);
                 break;
             case EVFS_SUPER_UPDATE:
-                evfs_add_lockable(lockable, EVFS_TYPE_SUPER, 0, 0);
+                evfs_add_lockable(lockable, EVFS_TYPE_SUPER, 0, 0, 0);
                 break;          
             case EVFS_EXTENT_ALLOC:
+                ret = evfs_add_extent_group_lockable(lockable, 1, entry->data);
+                break;
             case EVFS_INODE_ALLOC:
             case EVFS_EXTENT_WRITE:
             case EVFS_DIRENT_ADD:
@@ -566,10 +608,11 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
                 break;
             default:
                 ret = -EINVAL;
-                aa->param.errop = entry->id;
         }
-        
+               
         if (ret < 0) {
+            printk("evfs: operation %d failed during lock add.\n", entry->id);
+            aa->param.errop = entry->id;
             goto fail;
         }
     }
@@ -602,16 +645,20 @@ evfs_run_atomic_action(struct super_block * sb,
     unsigned i, j, k;
     
     /* set up atomic action */
-    ret = evfs_new_atomic_action(&aa, sb, arg);
+    ret = evfs_new_atomic_action(&aa, arg);
     if (ret < 0) {
         return ret;
     }
     
+    aa->sb = sb;
+    aa->fsop = fop;
+    
     //printk("atomic_action: %d read, %d comp, %d write\n", 
-    //    aa->nr_read, aa->nr_comp, aa->write_op ? 1 : 0);
+    //   aa->nr_read, aa->nr_comp, aa->write_op ? 1 : 0);
     
     ret = evfs_new_lock_set(aa, &lk);
     if (ret < 0) {
+        printk("evfs: error while creating lock set\n");
         goto fail;
     }
     

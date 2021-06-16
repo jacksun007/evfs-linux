@@ -13,11 +13,21 @@
 #include <uapi/linux/evfs.h>
 #include <uapi/linux/evfsctl.h>
 
+struct evfs_atomic_action;
+
 // note that for dirent operations, the parent directory is locked
 struct evfs_lockable {
     unsigned type;
-    int exclusive;  // read or write lock?
+    int exclusive;              // read or write lock?
     unsigned long object_id;
+    unsigned long data;
+};
+
+struct evfs_atomic_op {
+    long (* prepare)(struct evfs_atomic_action * aa, struct evfs_opentry * op);
+    long (* lock)(struct evfs_atomic_action * aa, struct evfs_lockable * lkb);
+    void (* unlock)(struct evfs_atomic_action * aa, struct evfs_lockable * lkb);
+    long (* execute)(struct evfs_atomic_action * aa, struct evfs_opentry * op);
 };
 
 struct evfs_atomic_action {
@@ -26,6 +36,7 @@ struct evfs_atomic_action {
 
     /* used by fs to execute the atomic action */
     struct super_block * sb;
+    struct evfs_atomic_op * fsop;
 
     /* set to null if absent (e.g. read-only atomic action would not have
        a write_op so write_op == NULL) */
@@ -37,19 +48,13 @@ struct evfs_atomic_action {
     struct evfs_atomic_action_param param;
 };
 
-struct evfs_atomic_op {
-    long (* lock)(struct evfs_atomic_action * aa, struct evfs_lockable * lkb);
-    void (* unlock)(struct evfs_atomic_action * aa, struct evfs_lockable * lkb);
-    long (* execute)(struct evfs_atomic_action * aa, struct evfs_opentry * op);
-};
-
 /* fs/dcache.c */
 extern void d_drop_entry_in_dir(struct inode *, struct qstr *);
 
 /* fs/evfs.c */
-long evfs_run_atomic_action(struct super_block * sb, struct evfs_atomic_op *fop,
-                            void * arg);
-
+long evfs_run_atomic_action(struct super_block * sb,
+                            struct evfs_atomic_op *fop, void * arg);              
+                            
 extern ssize_t evfs_page_read_iter(struct inode *, loff_t *, struct iov_iter *,
 		ssize_t, struct page *(*)(struct address_space *, pgoff_t));
 extern ssize_t evfs_perform_write(struct super_block *,

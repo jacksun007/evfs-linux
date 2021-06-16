@@ -29,6 +29,7 @@
 #include "f2fs.h"
 #include "segment.h"
 #include "node.h"
+#include "evfs.h"
 #include <trace/events/f2fs.h>
 
 static inline void
@@ -126,8 +127,10 @@ f2fs_extent_check(struct f2fs_sb_info *sbi, block_t start,
 	struct seg_entry *se = get_seg_entry(sbi, segno);
 
 	/* Check whether the beginning of extent belongs in data segment */
-	if (start < SEG0_BLKADDR(sbi) || !IS_DATASEG(se->type))
+	if (start < SEG0_BLKADDR(sbi) || !IS_DATASEG(se->type)) {
+	    printk("error: address %u < %u.\n", start, SEG0_BLKADDR(sbi));
 		return -EFAULT;
+    }
 
 	if (type == EVFS_ANY) {
 		for (count = 0; count < length; count++) {
@@ -148,6 +151,8 @@ f2fs_extent_check(struct f2fs_sb_info *sbi, block_t start,
 		}
 		return 1;
 	}
+	
+	printk("error: unknown query type %d.\n", (int)type);
 	return -EFAULT;
 }
 
@@ -410,38 +415,6 @@ out:
 }
 
 long
-f2fs_evfs_extent_alloc(struct file *filp,
-		struct super_block *sb, unsigned long arg)
-{
-	struct evfs_extent evfs_ext;
-	struct evfs_extent_alloc_op ext_op;
-	struct f2fs_sb_info *sbi = F2FS_SB(sb);
-	int ret = 0, use_hint = 0;
-
-	if (copy_from_user(&ext_op, (struct evfs_extent_alloc_op __user *) arg,
-				sizeof(struct evfs_extent_alloc_op)))
-		return -EFAULT;
-
-	evfs_ext = ext_op.extent;
-
-	if (ext_op.flags == EVFS_EXTENT_ALLOC_FIXED) {
-		ret = f2fs_extent_check(sbi, evfs_ext.addr,
-					evfs_ext.len, EVFS_ANY);
-		if (ret < 0) {
-			ret = -ENOSPC;
-			goto out;
-		}
-		use_hint = 1;
-	}
-
-	ret = reserve_extents(sbi, evfs_ext.addr, evfs_ext.len, use_hint);
-
-out:
-	f2fs_balance_fs(sbi, true);
-	return ret;
-}
-
-long
 f2fs_evfs_extent_free(struct file *filp, struct super_block *sb, unsigned long arg)
 {
 	struct evfs_extent evfs_ext;
@@ -473,30 +446,26 @@ f2fs_evfs_extent_free(struct file *filp, struct super_block *sb, unsigned long a
 	return 0;
 }
 
+static
 long
-f2fs_evfs_extent_active(struct file *filp, struct super_block *sb, unsigned long arg)
+f2fs_evfs_extent_active(struct super_block *sb, void __user * arg)
 {
 	struct evfs_extent_query evfs_query;
 	struct f2fs_sb_info *sbi = F2FS_SB(sb);
 	int ret;
 
-	if (copy_from_user(&evfs_query, (struct evfs_extent_query __user *) arg,
-				sizeof (struct evfs_extent_query)))
+	if (copy_from_user(&evfs_query, arg, sizeof(struct evfs_extent_query)))
 		return -EFAULT;
 
 	ret = f2fs_extent_check(sbi, evfs_query.extent.addr,
-			evfs_query.extent.len, evfs_query.query);
+			                evfs_query.extent.len, evfs_query.query);
 
-	if (ret < 0) {
-		f2fs_msg(sb, KERN_ERR, "f2fs_evfs_extent_active: "
-				"invalid query request");
-	} else if (ret) {
-		f2fs_msg(sb, KERN_ERR, "f2fs_evfs_extent_active: "
-				"selected block is active");
-	} else {
-		f2fs_msg(sb, KERN_ERR, "f2fs_evfs_extent_active: "
-				"selected block is NOT active");
-	}
+	if (ret < 0)
+	    return ret;
+	    
+	if (copy_to_user(arg, &ret, sizeof(int)))
+	    return -EFAULT;
+	
 	return ret;
 }
 
@@ -1237,6 +1206,7 @@ out:
 }
 
 
+
 long
 f2fs_evfs_meta_move(struct super_block *sb, unsigned long arg)
 {
@@ -1248,6 +1218,184 @@ f2fs_evfs_meta_move(struct super_block *sb, unsigned long arg)
 		return -EFAULT;
 
 	return __metadata_move(sbi, op.md.blkaddr, op.to_blkaddr);
+}
+
+static
+long
+f2fs_evfs_prepare_extent_alloc(struct super_block * sb, void * arg)
+{
+    struct evfs_extent extent;
+    struct f2fs_sb_info * sbi = F2FS_SB(sb);
+
+    long ret = copy_from_user(&extent, (struct evfs_extent __user *)arg, 
+                         sizeof(struct evfs_extent));
+    if (ret != 0) {
+        return -EFAULT;
+    }
+    
+    // blkaddr out-of-bound
+    if (extent.addr < SEG0_BLKADDR(sbi) || extent.addr >= MAX_BLKADDR(sbi)) {
+        // exception: 0 means allocate anywhere that fits the length
+        if (extent.addr != 0)      
+            return -EINVAL;         
+    }
+    
+    // requested extent size too big
+    if (extent.len >= sbi->blocks_per_seg) {
+        printk("evfs: f2fs does not support allocating more than %d blocks "
+               "at a time.", (int)sbi->blocks_per_seg);
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
+static
+long
+f2fs_evfs_prepare(struct evfs_atomic_action * aa, struct evfs_opentry * op)
+{
+    long ret = 0;
+
+    switch (op->code) {    
+        case EVFS_EXTENT_ALLOC:
+            ret = f2fs_evfs_prepare_extent_alloc(aa->sb, op->data);
+            break;
+        default:
+            ret = 0;
+    }
+    
+    return ret;
+}
+
+#if 0
+long
+f2fs_evfs_extent_alloc(struct file *filp,
+		struct super_block *sb, unsigned long arg)
+{
+	struct evfs_extent evfs_ext;
+	struct evfs_extent_alloc_op ext_op;
+	struct f2fs_sb_info *sbi = F2FS_SB(sb);
+	int ret = 0, use_hint = 0;
+
+	if (copy_from_user(&ext_op, (struct evfs_extent_alloc_op __user *) arg,
+				sizeof(struct evfs_extent_alloc_op)))
+		return -EFAULT;
+
+	evfs_ext = ext_op.extent;
+
+	if (ext_op.flags == EVFS_EXTENT_ALLOC_FIXED) {
+		ret = f2fs_extent_check(sbi, evfs_ext.addr,
+					evfs_ext.len, EVFS_ANY);
+		if (ret < 0) {
+			ret = -ENOSPC;
+			goto out;
+		}
+		use_hint = 1;
+	}
+
+	ret = reserve_extents(sbi, evfs_ext.addr, evfs_ext.len, use_hint);
+
+out:
+	f2fs_balance_fs(sbi, true);
+	return ret;
+}
+#endif
+
+static
+long
+f2fs_evfs_segment_lock(struct super_block * sb, struct evfs_lockable * lkb)
+{
+    struct f2fs_sb_info *sbi = F2FS_SB(sb);
+    struct sit_info *sit_i = SIT_I(sbi);
+	struct curseg_info * curseg;
+	unsigned long remain, requested_len = lkb->data;
+
+    /* for now, just support flexible allocation */
+    if (lkb->object_id != 0) {
+        return -ENOSYS;
+    }
+    
+    curseg = CURSEG_I(sbi, CURSEG_WARM_DATA);
+    mutex_lock(&curseg->curseg_mutex);
+    
+    /* during prepare, we already verified that requested_len < 512 */
+    remain = sbi->blocks_per_seg - curseg->next_blkoff;  
+    if (remain < requested_len) {
+        printk("%lu < %lu, must switch segment\n", remain, requested_len);
+        mutex_unlock(&curseg->curseg_mutex);
+
+        sit_i->s_ops->allocate_segment(sbi, CURSEG_WARM_DATA, false);
+        curseg = CURSEG_I(sbi, CURSEG_WARM_DATA);
+        mutex_lock(&curseg->curseg_mutex);
+        printk("new segment blkoff = %u\n", curseg->next_blkoff);
+    }
+    
+    if (curseg->alloc_type != LFS) {
+        /* TODO: find a new curseg */
+        mutex_unlock(&curseg->curseg_mutex);
+        printk("evfs: segment_lock does not support SSR allocation.\n");
+        return -ENOSYS;
+    }
+    
+	mutex_lock(&sit_i->sentry_lock);
+    return 0;
+}
+
+static 
+long
+f2fs_evfs_extent_alloc(struct super_block *sb, void __user * arg)
+{
+    struct evfs_extent extent;
+    struct f2fs_sb_info *sbi = F2FS_SB(sb);
+    struct curseg_info *curseg;
+    unsigned long blkaddr, end;
+	long ret = 0;
+
+    if (copy_from_user(&extent, arg, sizeof(struct evfs_extent)))
+		return -EFAULT;
+
+    curseg = CURSEG_I(sbi, CURSEG_WARM_DATA);
+	extent.addr = blkaddr = START_BLOCK(sbi, curseg->segno) + curseg->next_blkoff;	
+	end = extent.addr + extent.len;
+	
+	for (; blkaddr < end; blkaddr++) 
+	{
+	    // this is just for testing
+	    unsigned segno = GET_SEGNO(sbi, blkaddr);	    
+	    if (segno != curseg->segno) {
+	        printk("evfs: extent_alloc crossed segment boundary!\n");
+	        ret = -EIO;
+	        goto out;
+	    }
+	
+	    update_sit_entry(sbi, blkaddr, 1);
+	    
+	    // NOTE: this assumes LFS, which we check during segment lock
+		curseg->next_blkoff++;      
+	}
+
+	if (copy_to_user(arg, &extent.addr, sizeof(extent.addr)))
+		return -EFAULT;
+	
+out:
+	return ret;
+}
+
+static
+void
+f2fs_evfs_segment_unlock(struct super_block * sb, struct evfs_lockable * lkb)
+{
+    struct f2fs_sb_info * sbi = F2FS_SB(sb);
+    struct sit_info * sit_i = SIT_I(sbi);
+    struct curseg_info * curseg = curseg = CURSEG_I(sbi, CURSEG_WARM_DATA);
+    
+    // we don't need to look at object_id now since we always lock curseg
+    (void)lkb;
+    mutex_unlock(&sit_i->sentry_lock);
+	mutex_unlock(&curseg->curseg_mutex);
+	
+	// TODO: make sure we can do this no matter what
+	f2fs_balance_fs(sbi, true);
 }
 
 static
@@ -1304,6 +1452,11 @@ f2fs_evfs_lock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable)
     case EVFS_TYPE_SUPER:
         /* nothing needs to be done here */
         break;
+    case EVFS_TYPE_EXTENT_GROUP:
+        // defined in segment.c
+        err = f2fs_evfs_segment_lock(aa->sb, lockable);
+        break;
+    case EVFS_TYPE_INODE_GROUP:
     case EVFS_TYPE_EXTENT:
     case EVFS_TYPE_DIRENT:
     case EVFS_TYPE_METADATA:
@@ -1326,6 +1479,10 @@ f2fs_evfs_unlock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable
     case EVFS_TYPE_SUPER:
         /* nothing needs to be done here */
         break;
+    case EVFS_TYPE_EXTENT_GROUP:
+        f2fs_evfs_segment_unlock(aa->sb, lockable);
+        break;
+    case EVFS_TYPE_INODE_GROUP:    
     case EVFS_TYPE_EXTENT:
     case EVFS_TYPE_DIRENT:
     case EVFS_TYPE_METADATA:
@@ -1348,9 +1505,13 @@ f2fs_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
     case EVFS_SUPER_INFO:
         err = f2fs_evfs_sb_get(aa->sb, op->data);
         break;     
+    case EVFS_EXTENT_ACTIVE:
+        err = f2fs_evfs_extent_active(aa->sb, op->data);
+        break;
     case EVFS_DIRENT_INFO:
+    case EVFS_INODE_ACTIVE:
     case EVFS_EXTENT_READ:
-    case EVFS_INODE_READ:   
+    case EVFS_INODE_READ:
         err = -ENOSYS;
         break;
     case EVFS_INODE_UPDATE:
@@ -1359,6 +1520,8 @@ f2fs_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
     case EVFS_SUPER_UPDATE:
     case EVFS_DIRENT_UPDATE:
     case EVFS_EXTENT_ALLOC:
+        err = f2fs_evfs_extent_alloc(aa->sb, op->data);
+        break;
     case EVFS_INODE_ALLOC:
     case EVFS_EXTENT_WRITE:
     case EVFS_INODE_WRITE:
@@ -1377,6 +1540,7 @@ f2fs_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 }
 
 struct evfs_atomic_op f2fs_evfs_atomic_ops = {
+    .prepare = f2fs_evfs_prepare,
     .lock = f2fs_evfs_lock,
     .unlock = f2fs_evfs_unlock,
     .execute = f2fs_evfs_execute,
@@ -1391,10 +1555,6 @@ f2fs_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	switch(cmd) {
 	case FS_IOC_ATOMIC_ACTION:   
 	    return evfs_run_atomic_action(sb, &f2fs_evfs_atomic_ops, (void *)arg);
-	case FS_IOC_EXTENT_ALLOC:
-		return f2fs_evfs_extent_alloc(filp, sb, arg);
-	case FS_IOC_EXTENT_ACTIVE:
-		return f2fs_evfs_extent_active(filp, sb, arg);
 	case FS_IOC_EXTENT_FREE:
 		return f2fs_evfs_extent_free(filp, sb, arg);
 	case FS_IOC_EXTENT_WRITE:
