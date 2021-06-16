@@ -1001,11 +1001,11 @@ long
 f2fs_evfs_inode_iter(struct file *filp, struct super_block *sb, unsigned long arg)
 {
 	struct evfs_iter_ops iter;
-	struct __evfs_ino_iter_param param;
 	struct f2fs_sb_info *sbi = F2FS_SB(sb);
 	struct f2fs_nm_info *nm = NM_I(sbi);
 	struct node_info ni;
 	struct inode *inode;
+	u64 param;
 	nid_t end_nid = nm->max_nid, nid = 0;
 	int ret = 0;
 
@@ -1025,13 +1025,10 @@ f2fs_evfs_inode_iter(struct file *filp, struct super_block *sb, unsigned long ar
 		if (IS_ERR(inode))
 			continue;
 
-		param.ino_nr = ni.ino;
-		f2fs_msg(sb, KERN_ERR, "i_bytes: %u, i_size: %lld", inode->i_bytes, inode->i_size);
-		vfs_to_evfs_inode(inode, &param.i);
+		param = ni.ino;
 		iput(inode);
 
-		if (evfs_copy_param(&iter, &param,
-				sizeof(struct __evfs_ino_iter_param))) {
+		if (evfs_copy_param(&iter, &param, sizeof(u64))) {
 			ret = 1;
 			goto out;
 		}

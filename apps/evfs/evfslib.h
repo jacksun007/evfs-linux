@@ -38,8 +38,8 @@ typedef struct evfs_iter_s {
     evfs_t * evfs;
     int type;
     int flags;
-    u64 count;
-    u64 next_req;
+    unsigned long count;
+    unsigned long next_req;
     struct evfs_iter_ops op;
 } evfs_iter_t;
 
