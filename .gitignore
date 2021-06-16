@@ -121,3 +121,5 @@ rsync_*
 clang-format
 compile_commands.json
 .editorconfig
+
+shortcut

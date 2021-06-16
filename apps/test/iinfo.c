@@ -61,7 +61,10 @@ int main(int argc, char * argv[])
         goto error;
     }
 
-    if (argc > 1) {
+    if (argc < 3) {
+        goto error;
+    }
+    else {
         evfs = evfs_open(argv[1]);
     }
     

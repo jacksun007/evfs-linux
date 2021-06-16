@@ -34,8 +34,11 @@ u64 inode_next(evfs_iter_t * it);
 struct evfs_extent extent_next(evfs_iter_t * it);
 void iter_end(evfs_iter_t * it);
 
-// extent
+// Extent
+// Note: You may only free/write to extents that you allocated yourself,
+//       and it hasn't been mapped to another inode.
 int extent_alloc(evfs_t * evfs, u64 pa, u64 len, int flags);
+int extent_active(evfs_t * evfs, u64 pa, u64 len, int flags);
 int extent_free(evfs_t * evfs, u64 pa);
 int extent_write(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len);
 

@@ -1,3 +1,9 @@
 iinfo
-iup
+iset
 sbinfo
+exalloc
+exup
+exwrite
+imap
+ifree
+exfree

@@ -9,7 +9,7 @@
  * IMPORTANT: you MUST include uapi/linux/evfs.h before this file. i.e.
  *
  * #include <uapi/linux/evfs.h>
- * #include <uapi/linux/evfsctl.h>c
+ * #include <uapi/linux/evfsctl.h>
  * 
  */ 
 
@@ -23,6 +23,8 @@ enum evfs_type {
     EVFS_TYPE_SUPER,
     EVFS_TYPE_DIRENT,
     EVFS_TYPE_METADATA,
+    EVFS_TYPE_EXTENT_GROUP,     // e.g. segment, block group
+    EVFS_TYPE_INODE_GROUP,      // e.g. block group
 };
 
 #define EVFS_BUFSIZE (1024 * sizeof(char))
@@ -51,18 +53,15 @@ struct __evfs_imap {
 };
 
 struct evfs_extent_alloc_op {
-    unsigned long flags;
     struct evfs_extent extent;
+    u64 flags;
 };
 
-enum evfs_query {
-    EVFS_ANY = 1,
-    EVFS_ALL = 2,
-};
-
+// TODO: this is the same as extent_alloc_op
 struct evfs_extent_query {
+    int result; // output
+    int query;
     struct evfs_extent extent;
-    enum evfs_query query;
 };
 
 struct evfs_dirent_add_op {
@@ -156,9 +155,13 @@ enum evfs_opcode {
     EVFS_INODE_INFO = EVFS_READ_OP_BEGIN,
     EVFS_SUPER_INFO,
     EVFS_DIRENT_INFO,
+    
+    EVFS_INODE_ACTIVE,
+    EVFS_DIRENT_ACTIVE,
+    EVFS_EXTENT_ACTIVE,
 
-    EVFS_EXTENT_READ,   // read raw data from extent
     EVFS_INODE_READ,    // same as posix read()
+    EVFS_EXTENT_READ,   // read raw data from extent
 
     EVFS_READ_OP_END,
 
@@ -169,11 +172,14 @@ enum evfs_opcode {
     EVFS_SUPER_UPDATE,
     EVFS_DIRENT_UPDATE,
     
-    EVFS_EXTENT_ALLOC,
     EVFS_INODE_ALLOC,
-
-    EVFS_EXTENT_WRITE,
+    EVFS_EXTENT_ALLOC,
+        
     EVFS_INODE_WRITE,
+    EVFS_EXTENT_WRITE,
+    
+    EVFS_INODE_FREE,
+    EVFS_EXTENT_FREE,  
 
     // Note: the identifier for dirents is its filename + parent inode
     EVFS_DIRENT_ADD,
