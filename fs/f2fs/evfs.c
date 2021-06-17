@@ -460,12 +460,6 @@ f2fs_evfs_extent_active(struct super_block *sb, void __user * arg)
 	ret = f2fs_extent_check(sbi, evfs_query.extent.addr,
 			                evfs_query.extent.len, evfs_query.query);
 
-	if (ret < 0)
-	    return ret;
-	    
-	if (copy_to_user(arg, &ret, sizeof(int)))
-	    return -EFAULT;
-	
 	return ret;
 }
 
@@ -1374,9 +1368,7 @@ f2fs_evfs_extent_alloc(struct super_block *sb, void __user * arg)
 		curseg->next_blkoff++;      
 	}
 
-	if (copy_to_user(arg, &extent.addr, sizeof(extent.addr)))
-		return -EFAULT;
-	
+	return (long)extent.addr;
 out:
 	return ret;
 }

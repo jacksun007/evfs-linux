@@ -62,6 +62,7 @@ struct evfs_atomic * atomic_begin(evfs_t * evfs);
 int atomic_const_equal(struct evfs_atomic * aa, int id, int field, u64 rhs);
 int atomic_execute(struct evfs_atomic * aa);
 void atomic_end(struct evfs_atomic * aa);
+long atomic_result(struct evfs_atomic * aa, int id);
 
 #endif // EVFS_H_
 

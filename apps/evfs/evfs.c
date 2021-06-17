@@ -135,32 +135,23 @@ int super_info(evfs_t * evfs, struct evfs_super_block * sb)
 int extent_alloc(evfs_t * evfs, u64 pa, u64 len, int flags)
 {
     struct evfs_extent_alloc_op ext_op;
-    int ret;
     
     ext_op.extent.addr = pa;
     ext_op.extent.len = len;
     ext_op.flags = flags;
 
-    ret = evfs_operation(evfs, EVFS_EXTENT_ALLOC, &ext_op);
-    if (ret < 0)
-        return ret;
-    
-    // TODO: should return long instead
-    return (int)ext_op.extent.addr;
+    return evfs_operation(evfs, EVFS_EXTENT_ALLOC, &ext_op);
 }
 
 int extent_active(evfs_t * evfs, u64 pa, u64 len, int flags)
 {
     struct evfs_extent_query ext_op;
-    int ret;
     
-    ext_op.result = -1;     // valid result are 0 and 1, so set default to -1
     ext_op.query = flags;
     ext_op.extent.addr = pa;
     ext_op.extent.len = len;
        
-    ret = evfs_operation(evfs, EVFS_EXTENT_ACTIVE, &ext_op);
-    return (ret < 0) ? ret : ext_op.result;      
+    return evfs_operation(evfs, EVFS_EXTENT_ACTIVE, &ext_op);    
 }
 
 int extent_free(evfs_t * evfs, u64 pa)

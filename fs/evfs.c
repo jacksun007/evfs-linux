@@ -681,6 +681,7 @@ evfs_run_atomic_action(struct super_block * sb,
     // run read set first 
     for (k = 0; k < aa->nr_read; k++) {
         ret = fop->execute(aa, aa->read_set[k]);
+        aa->read_set[k]->result = ret;
         if (ret < 0) {
             aa->param.errop = aa->read_set[k]->id;
             goto unlock;
@@ -689,6 +690,7 @@ evfs_run_atomic_action(struct super_block * sb,
     
     for (k = 0; k < aa->nr_comp; k++) {
         ret = evfs_execute_compare(aa, aa->comp_set[k]);
+        aa->comp_set[k]->result = ret;
         if (ret < 0) {
             aa->param.errop = aa->comp_set[k]->id;
             goto unlock;
@@ -698,6 +700,7 @@ evfs_run_atomic_action(struct super_block * sb,
     // run write op last 
     if (aa->write_op) {
         ret = fop->execute(aa, aa->write_op);
+        aa->write_op->result = ret;
         if (ret < 0) {
             aa->param.errop = aa->write_op->id;
             goto unlock;
@@ -721,7 +724,8 @@ unlock:
 fail:
     /* assume success otherwise we are screwed anyways */
     copy_to_user((struct evfs_atomic_action_param __user *) arg, 
-                 &aa->param, sizeof(struct evfs_atomic_action_param));
+                 &aa->param, sizeof(struct evfs_atomic_action_param) + 
+                 aa->param.count*sizeof(struct evfs_opentry));
     evfs_destroy_atomic_action(aa);
     return ret;
 }

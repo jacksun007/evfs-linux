@@ -11,16 +11,16 @@ PROG=iinfo iset sbinfo exalloc exup
 
 all: depend $(EVFSLIB) $(PROG)
 
-iinfo: iinfo.o 
+iinfo: iinfo.o $(EVFSLIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
 
-iset: iset.o
+iset: iset.o $(EVFSLIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
 
-sbinfo: sbinfo.o
+sbinfo: sbinfo.o $(EVFSLIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
 
-exalloc: exalloc.o
+exalloc: exalloc.o $(EVFSLIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
 
 exup: exup.o $(EVFSLIB)

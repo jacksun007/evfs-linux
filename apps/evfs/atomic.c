@@ -49,6 +49,7 @@ atomic_action_append(struct atomic_action * aab, int opcode, void * data)
     aa->item[aa->count].code = opcode;
     aa->item[aa->count].id   = aa->count + 1;
     aa->item[aa->count].data = data;
+    aa->item[aa->count].result = -ECANCELED;
     aa->count += 1;
     
     // this is the item id
@@ -82,6 +83,10 @@ int evfs_operation(struct evfs_atomic * evfs, int opcode, void * data)
         // on successful append, execute the operation
         if (!(ret < 0)) {
             ret = atomic_execute(&aa->header);
+            if (ret >= 0) {
+                // on successful execute, return the result of the operation
+                ret = aa->param.item[0].result;
+            }
         }
             
         atomic_end(&aa->header);
@@ -143,5 +148,18 @@ int atomic_const_equal(struct evfs_atomic * ea, int id, int field, u64 rhs)
     }
     
     return 0;
+}
+
+long atomic_result(struct evfs_atomic * ea, int id)
+{
+    struct atomic_action * aa = to_atomic_action(ea);
+    struct evfs_opentry * entry;
+
+    if (id <= 0 || id > aa->param.count)
+        return -EINVAL;
+    
+    entry = &aa->param.item[id - 1];
+    assert(entry->id == id);
+    return entry->id;
 }
 

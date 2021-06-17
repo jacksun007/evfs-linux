@@ -27,7 +27,7 @@ enum evfs_type {
     EVFS_TYPE_INODE_GROUP,      // e.g. block group
 };
 
-#define EVFS_BUFSIZE (1024 * sizeof(char))
+#define EVFS_BUFSIZE (512 * sizeof(char))
 #define EVFS_MAX_NAME_LEN 256
 
 // TODO(tbrindus): might want to switch f2fs to use this, maybe
@@ -59,9 +59,8 @@ struct evfs_extent_alloc_op {
 
 // TODO: this is the same as extent_alloc_op
 struct evfs_extent_query {
-    int result; // output
-    int query;
     struct evfs_extent extent;
+    int query;
 };
 
 struct evfs_dirent_add_op {
@@ -196,6 +195,7 @@ struct evfs_opentry {
     int code;
     int id;
     void * data;
+    u64 result;
 };
 
 struct evfs_atomic_action_param {
