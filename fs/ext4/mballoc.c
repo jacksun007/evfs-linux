@@ -2925,17 +2925,20 @@ ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac,
 		 * Fix the bitmap and return EFSCORRUPTED
 		 * We leak some of the blocks here.
 		 */
-		ext4_lock_group(sb, ac->ac_b_ex.fe_group);
+		if (!(ac->ac_flags & EXT4_MB_EVFS))
+			ext4_lock_group(sb, ac->ac_b_ex.fe_group);
 		ext4_set_bits(bitmap_bh->b_data, ac->ac_b_ex.fe_start,
 			      ac->ac_b_ex.fe_len);
-		ext4_unlock_group(sb, ac->ac_b_ex.fe_group);
+		if (!(ac->ac_flags & EXT4_MB_EVFS))
+			ext4_unlock_group(sb, ac->ac_b_ex.fe_group);
 		err = ext4_handle_dirty_metadata(handle, NULL, bitmap_bh);
 		if (!err)
 			err = -EFSCORRUPTED;
 		goto out_err;
 	}
 
-	ext4_lock_group(sb, ac->ac_b_ex.fe_group);
+	if (!(ac->ac_flags & EXT4_MB_EVFS))
+		ext4_lock_group(sb, ac->ac_b_ex.fe_group);
 #ifdef AGGRESSIVE_CHECK
 	{
 		int i;
@@ -2958,7 +2961,8 @@ ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac,
 	ext4_block_bitmap_csum_set(sb, ac->ac_b_ex.fe_group, gdp, bitmap_bh);
 	ext4_group_desc_csum_set(sb, ac->ac_b_ex.fe_group, gdp);
 
-	ext4_unlock_group(sb, ac->ac_b_ex.fe_group);
+	if (!(ac->ac_flags & EXT4_MB_EVFS))
+		ext4_unlock_group(sb, ac->ac_b_ex.fe_group);
 	percpu_counter_sub(&sbi->s_freeclusters_counter, ac->ac_b_ex.fe_len);
 	/*
 	 * Now reduce the dirty block count also. Should not go negative

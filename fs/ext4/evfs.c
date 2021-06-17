@@ -980,6 +980,7 @@ static long
 ext4_evfs_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 {
 	struct ext4_group_info * grp;
+	struct ext4_buddy e4b;
 	ext4_group_t group;
 	ext4_grpblk_t offset;
 	unsigned long addr = lkb->object_id, len = lkb->data;
@@ -992,16 +993,18 @@ ext4_evfs_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	}
 
 	grp = ext4_get_group_info(sb, group);
-
-	ext4_lock_group(sb, group);
-
 	/*
 	 * TODO: Make this flexible later
 	 */
 	if (len > grp->bb_free) {
-		ext4_unlock_group(sb, group);
 		return -ENOMEM;
 	}
+
+	/* Ensure that the group is loaded first */
+	ext4_mb_load_buddy(sb, group, &e4b);
+	ext4_mb_unload_buddy(&e4b);
+
+	ext4_lock_group(sb, group);
 
 	return 0;
 }
@@ -1030,7 +1033,7 @@ ext4_evfs_group_unlock(struct super_block * sb, struct evfs_lockable * lkb)
 	struct ext4_group_info * grp;
 	ext4_group_t group;
 	ext4_grpblk_t offset;
-	unsigned long addr = lkb->object_id, len = lkb->data;
+	unsigned long addr = lkb->object_id;
 
 	ext4_get_group_no_and_offset(sb, addr, &group, &offset);
 
@@ -1057,9 +1060,10 @@ ext4_evfs_lock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable)
 		break;
 	case EVFS_TYPE_SUPER:
 		break;
-	case EVFS_TYPE_EXTENT:
+	case EVFS_TYPE_EXTENT_GROUP:
 		err = ext4_evfs_group_lock(aa->sb, lockable);
 		break;
+	case EVFS_TYPE_EXTENT:
 	case EVFS_TYPE_DIRENT:
 	case EVFS_TYPE_METADATA:
 		break;
@@ -1078,9 +1082,10 @@ ext4_evfs_unlock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable
 		break;
 	case EVFS_TYPE_SUPER:
 		break;
-	case EVFS_TYPE_EXTENT:
+	case EVFS_TYPE_EXTENT_GROUP:
 		ext4_evfs_group_unlock(aa->sb, lockable);
 		break;
+	case EVFS_TYPE_EXTENT:
 	case EVFS_TYPE_DIRENT:
 	case EVFS_TYPE_METADATA:
 		break;
