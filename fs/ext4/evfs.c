@@ -751,41 +751,40 @@ out:
 }
 
 static long
-ext4_evfs_extent_alloc(struct file *filp, struct super_block *sb,
-		unsigned long arg)
+ext4_evfs_extent_alloc(struct super_block * sb, void __user * arg)
 {
-	struct evfs_extent_alloc_op ext_op;
-	struct evfs_extent op;
+	struct evfs_extent extent;
 	struct ext4_allocation_context ac;
 	handle_t *handle = NULL;
 	ext4_group_t group, max_groups = ext4_get_groups_count(sb);
 	ext4_grpblk_t off_block;
 	int err = 0;
 
-	if (copy_from_user(&ext_op, (struct evfs_extent_alloc_op __user *) arg,
-				sizeof(ext_op)))
+	if (copy_from_user(&extent, (struct evfs_extent __user *) arg,
+				sizeof(extent)))
 		return -EFAULT;
-	op = ext_op.extent;
 
-	ext4_get_group_no_and_offset(sb, op.addr, &group, &off_block);
+	ext4_get_group_no_and_offset(sb, extent.addr, &group, &off_block);
 
 	if (max_groups < group) {
-		ext4_error(sb, "Given physical address (%llu) out of range", op.addr);
+		ext4_error(sb, "Given physical address (%llu) out of range", extent.addr);
 		return -EINVAL;
 	}
 
 	ac.ac_sb = sb;
 	ac.ac_g_ex.fe_group = group;
 	ac.ac_g_ex.fe_start = off_block;
-	ac.ac_g_ex.fe_len = op.len;
+	ac.ac_g_ex.fe_len = extent.len;
 	ac.ac_found = 0;
 	ac.ac_status = AC_STATUS_CONTINUE;
-	ac.ac_flags = EXT4_MB_HINT_TRY_GOAL;
+	ac.ac_flags = EXT4_MB_HINT_TRY_GOAL | EXT4_MB_EVFS;
 	ac.ac_inode = NULL;
-	if (ext_op.flags & EVFS_EXTENT_ALLOC_FIXED) {
-		ext4_msg(sb, KERN_ERR, "Hint goal only!");
-		ac.ac_flags |= EXT4_MB_HINT_GOAL_ONLY;
-	}
+
+	/* TODO: Obsolete now? */
+	/* if (ext_op.flags & EVFS_EXTENT_ALLOC_FIXED) { */
+	/* 	ext4_msg(sb, KERN_ERR, "Hint goal only!"); */
+	/* 	ac.ac_flags |= EXT4_MB_HINT_GOAL_ONLY; */
+	/* } */
 
 	err = ext4_mb_regular_allocator(&ac);
 	if (err) {
@@ -977,6 +976,36 @@ ext4_evfs_inode_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	return 0;
 }
 
+static long
+ext4_evfs_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
+{
+	struct ext4_group_info * grp;
+	ext4_group_t group;
+	ext4_grpblk_t offset;
+	unsigned long addr = lkb->object_id, len = lkb->data;
+
+	ext4_get_group_no_and_offset(sb, addr, &group, &offset);
+
+	/* for now, just support inflexible allocation */
+	if (!addr) {
+		return -ENOSYS;
+	}
+
+	grp = ext4_get_group_info(sb, group);
+
+	ext4_lock_group(sb, group);
+
+	/*
+	 * TODO: Make this flexible later
+	 */
+	if (len > grp->bb_free) {
+		ext4_unlock_group(sb, group);
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
 static void
 ext4_evfs_inode_unlock(struct super_block * sb, struct evfs_lockable * lkb)
 {
@@ -993,6 +1022,21 @@ ext4_evfs_inode_unlock(struct super_block * sb, struct evfs_lockable * lkb)
 		inode_unlock_shared(inode);
 
 	iput(inode);
+}
+
+static void
+ext4_evfs_group_unlock(struct super_block * sb, struct evfs_lockable * lkb)
+{
+	struct ext4_group_info * grp;
+	ext4_group_t group;
+	ext4_grpblk_t offset;
+	unsigned long addr = lkb->object_id, len = lkb->data;
+
+	ext4_get_group_no_and_offset(sb, addr, &group, &offset);
+
+	grp = ext4_get_group_info(sb, group);
+
+	ext4_unlock_group(sb, group);
 }
 
 static long
@@ -1012,7 +1056,10 @@ ext4_evfs_lock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable)
 		err = ext4_evfs_inode_lock(aa->sb, lockable);
 		break;
 	case EVFS_TYPE_SUPER:
+		break;
 	case EVFS_TYPE_EXTENT:
+		err = ext4_evfs_group_lock(aa->sb, lockable);
+		break;
 	case EVFS_TYPE_DIRENT:
 	case EVFS_TYPE_METADATA:
 		break;
@@ -1030,7 +1077,10 @@ ext4_evfs_unlock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable
 		ext4_evfs_inode_unlock(aa->sb, lockable);
 		break;
 	case EVFS_TYPE_SUPER:
+		break;
 	case EVFS_TYPE_EXTENT:
+		ext4_evfs_group_unlock(aa->sb, lockable);
+		break;
 	case EVFS_TYPE_DIRENT:
 	case EVFS_TYPE_METADATA:
 		break;
@@ -1063,7 +1113,10 @@ ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 		break;
 	case EVFS_SUPER_UPDATE:
 	case EVFS_DIRENT_UPDATE:
+		break;
 	case EVFS_EXTENT_ALLOC:
+		err = ext4_evfs_extent_alloc(aa->sb, op->data);
+		break;
 	case EVFS_INODE_ALLOC:
 		err = ext4_evfs_inode_alloc(aa->sb, op->data);
 		break;
@@ -1104,16 +1157,10 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return dirent_add(filp, sb, arg);
 	case FS_IOC_DIRENT_REMOVE:
 		return dirent_remove(filp, sb, arg);
-	case FS_IOC_INODE_ALLOC:
-		return ext4_evfs_inode_alloc(sb, (void *) arg);
 	case FS_IOC_INODE_FREE:
 		return ext4_evfs_inode_free(filp, sb, arg);
 	case FS_IOC_EXTENT_WRITE:
 		return ext4_evfs_extent_write(filp, sb, arg);
-	case FS_IOC_INODE_GET:
-		return ext4_evfs_inode_info(sb, (void *) arg);
-	case FS_IOC_INODE_SET:
-		return ext4_evfs_inode_set(sb, (void *) arg);
 	case FS_IOC_INODE_READ:
 		return ext4_evfs_inode_read(filp, sb, arg);
 	case FS_IOC_INODE_MAP:
@@ -1124,14 +1171,10 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return ext4_evfs_inode_iter(filp, sb, arg);
 	case FS_IOC_EXTENT_ACTIVE:
 		return ext4_evfs_extent_active(filp, sb, arg);
-	case FS_IOC_EXTENT_ALLOC:
-		return ext4_evfs_extent_alloc(filp, sb, arg);
 	case FS_IOC_EXTENT_FREE:
 		return ext4_evfs_extent_free(filp, sb, arg);
 	case FS_IOC_EXTENT_ITERATE:
 		return ext4_evfs_extent_iter(filp, sb, arg);
-	case FS_IOC_SUPER_GET:
-		return ext4_evfs_sb_get(sb, (void *) arg);
 	}
 
 	return -ENOTTY;

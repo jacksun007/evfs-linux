@@ -1767,7 +1767,8 @@ int ext4_mb_find_by_goal(struct ext4_allocation_context *ac,
 		return 0;
 	}
 
-	ext4_lock_group(ac->ac_sb, group);
+	if (!(ac->ac_flags & EXT4_MB_EVFS))
+		ext4_lock_group(ac->ac_sb, group);
 	max = mb_find_extent(e4b, ac->ac_g_ex.fe_start,
 			     ac->ac_g_ex.fe_len, &ex);
 	ex.fe_logical = 0xDEADFA11; /* debug value */
@@ -1800,7 +1801,8 @@ int ext4_mb_find_by_goal(struct ext4_allocation_context *ac,
 		ac->ac_b_ex = ex;
 		ext4_mb_use_best_found(ac, e4b);
 	}
-	ext4_unlock_group(ac->ac_sb, group);
+	if (!(ac->ac_flags & EXT4_MB_EVFS))
+		ext4_unlock_group(ac->ac_sb, group);
 	ext4_mb_unload_buddy(e4b);
 
 	return 0;
@@ -2120,7 +2122,8 @@ repeat:
 			if (err)
 				goto out;
 
-			ext4_lock_group(sb, group);
+			if (!(ac->ac_flags & EXT4_MB_EVFS))
+				ext4_lock_group(sb, group);
 
 			/*
 			 * We need to check again after locking the
@@ -2128,7 +2131,8 @@ repeat:
 			 */
 			ret = ext4_mb_good_group(ac, group, cr);
 			if (ret <= 0) {
-				ext4_unlock_group(sb, group);
+				if (!(ac->ac_flags & EXT4_MB_EVFS))
+					ext4_unlock_group(sb, group);
 				ext4_mb_unload_buddy(&e4b);
 				if (!first_err)
 					first_err = ret;
@@ -2144,7 +2148,8 @@ repeat:
 			else
 				ext4_mb_complex_scan_group(ac, &e4b);
 
-			ext4_unlock_group(sb, group);
+			if (!(ac->ac_flags & EXT4_MB_EVFS))
+				ext4_unlock_group(sb, group);
 			ext4_mb_unload_buddy(&e4b);
 
 			if (ac->ac_status != AC_STATUS_CONTINUE)

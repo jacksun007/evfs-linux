@@ -141,6 +141,8 @@ enum SHIFT_DIRECTION {
 #define EXT4_MB_USE_ROOT_BLOCKS		0x1000
 /* Use blocks from reserved pool */
 #define EXT4_MB_USE_RESERVED		0x2000
+/* Allocation is part of EVFS interface (disable locking) */
+#define EXT4_MB_EVFS                    0x4000
 
 struct ext4_allocation_request {
 	/* target inode for block we're allocating */
