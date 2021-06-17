@@ -81,24 +81,26 @@ evfs_iter_t * extent_iter(evfs_t * evfs, int flags)
 
 u64 inode_next(evfs_iter_t * it)
 {
-    struct __evfs_ino_iter_param *param;
+    u64 *param;
+    int ret = 0;
 
     if (it->type != EVFS_TYPE_INODE)
         return -1;
 
     /* If we have iterated through everything in the buffer, get more */
-    if (it->op.count < it->count) {
+    if (it->op.count <= it->count) {
         it->op.start_from = it->next_req;
-        if (ioctl(it->evfs->fd, FS_IOC_INODE_ITERATE, &it->op) <= 0)
+	ret = ioctl(it->evfs->fd, FS_IOC_INODE_ITERATE, &it->op);
+        if (ret <= 0)
             return 0;
         it->count = 0;
     }
 
-    param = ((struct __evfs_ino_iter_param *) it->op.buffer) + it->count;
+    param = ((u64 *) it->op.buffer) + it->count;
     ++it->count;
-    it->next_req = param->ino_nr + 1;
-    
-    return param->ino_nr;
+    it->next_req = *param + 1;
+
+    return *param;
 }
 
 struct evfs_extent extent_next(evfs_iter_t * it)
@@ -107,7 +109,7 @@ struct evfs_extent extent_next(evfs_iter_t * it)
     if (it->type != EVFS_TYPE_EXTENT)
         return ret;
     
-    if (it->op.count < it->count) {
+    if (it->op.count <= it->count) {
         it->op.start_from = it->next_req;
         if (ioctl(it->evfs->fd, FS_IOC_EXTENT_ITERATE, &it->op) <= 0)
             return ret;   

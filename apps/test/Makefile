@@ -7,7 +7,8 @@ EVFSDIR=../evfs
 EVFSLIB=$(EVFSDIR)/libevfs.a
 LOADLIBES=-levfs
 CFLAGS=-Wall -Wextra -Werror -I$(EVFSDIR)/include -L../evfs -ggdb
-PROG=iinfo iset sbinfo exalloc exup
+PROG=iinfo iup sbinfo iiter
+PROG=iinfo iset sbinfo exalloc exup iiter
 
 all: depend $(EVFSLIB) $(PROG)
 
@@ -18,6 +19,9 @@ iset: iset.o $(EVFSLIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
 
 sbinfo: sbinfo.o $(EVFSLIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
+
+iiter: iiter.o $(EVFSLIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
 
 exalloc: exalloc.o $(EVFSLIB)
@@ -33,11 +37,11 @@ exup: exup.o $(EVFSLIB)
 .PHONY: $(EVFSLIB)
 $(EVFSLIB):
 	cd $(EVFSDIR) && $(MAKE)
-	
+
 .PHONY: clean
 clean:
 	rm -f .depend $(PROG) *.o
-	
+
 depend:
 	$(CC) -MM *.c > .depend
 

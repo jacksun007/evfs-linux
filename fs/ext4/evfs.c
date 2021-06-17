@@ -526,11 +526,11 @@ ext4_evfs_inode_iter(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
 	struct evfs_iter_ops iter;
-	struct __evfs_ino_iter_param param;
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
 	struct inode *inode;
 	struct ext4_group_desc *gdp;
 	struct buffer_head *bh;
+	u64 param;
 	ext4_group_t group, max_group = sbi->s_groups_count;
 	unsigned long ino_offset;
 	int ino_nr = sbi->s_first_ino;
@@ -583,11 +583,9 @@ ext4_evfs_inode_iter(struct file *filp, struct super_block *sb,
 				inode = ext4_iget(sb, ino_nr);
 				if (!inode || IS_ERR(inode) || inode->i_state & I_CLEAR)
 					continue;
-				param.ino_nr = ino_nr;
-				vfs_to_evfs_inode(inode, &param.i);
 				iput(inode);
-				if (evfs_copy_param(&iter, &param,
-						sizeof(struct __evfs_ino_iter_param))) {
+				param = ino_nr;
+				if (evfs_copy_param(&iter, &param, sizeof(u64))) {
 					brelse(bh);
 					ret = 1;
 					goto out;
