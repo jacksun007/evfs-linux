@@ -229,8 +229,7 @@ ext4_evfs_inode_free(struct file *filp, struct super_block *sb,
 }
 
 static long
-ext4_evfs_inode_read(struct file *filp, struct super_block *sb,
-		unsigned long arg)
+ext4_evfs_inode_read(struct super_block *sb, void __user * arg)
 {
 	struct evfs_inode_read_op read_op;
 	struct inode *inode;
@@ -604,8 +603,7 @@ out:
 }
 
 static long
-ext4_evfs_extent_active(struct file *filp, struct super_block *sb,
-		unsigned long arg)
+ext4_evfs_extent_active(struct super_block * sb, void __user * arg)
 {
 	struct evfs_extent_query op;
 	struct ext4_free_extent fex;
@@ -616,11 +614,11 @@ ext4_evfs_extent_active(struct file *filp, struct super_block *sb,
 	handle_t *handle = NULL;
 	int err = 0;
 
-	if (copy_from_user(&op, (struct evfs_extent_query __user *) arg,
-				sizeof(struct evfs_extent_query)))
+	if (copy_from_user(&op, arg, sizeof(struct evfs_extent_query)))
 		return -EFAULT;
 
 	block = op.extent.addr;
+	printk("addr = %lu, len = %lu\n", block, op.extent.len);
 
 	ext4_get_group_no_and_offset(sb, block, &group, &off_block);
 
@@ -639,12 +637,11 @@ ext4_evfs_extent_active(struct file *filp, struct super_block *sb,
 	if (err)
 		goto out;
 
-	ext4_lock_group(sb, fex.fe_group);
 	err = ext4_extent_check(fex, bitmap_bh, op.query);
-	ext4_unlock_group(sb, fex.fe_group);
 
 out:
 	brelse(bitmap_bh);
+	printk("returning %d\n", err);
 	return err;
 }
 
@@ -977,7 +974,7 @@ ext4_evfs_inode_lock(struct super_block * sb, struct evfs_lockable * lkb)
 }
 
 static long
-ext4_evfs_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
+ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 {
 	struct ext4_group_info * grp;
 	struct ext4_buddy e4b;
@@ -1009,6 +1006,33 @@ ext4_evfs_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	return 0;
 }
 
+static long
+ext4_evfs_ino_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
+{
+	struct inode * inode = ext4_iget_normal(sb, lkb->object_id);
+	struct ext4_group_info * grp;
+	struct ext4_buddy e4b;
+	/* TODO: Currently, assume that object_id maps to inode number */
+	unsigned long ino = lkb->object_id;
+	ext4_group_t group = ino / EXT4_INODES_PER_GROUP(sb);
+
+	if (!inode)
+		return -ENOSYS;
+	if (IS_ERR(inode))
+		return ERR_PTR(inode);
+	iput(inode);
+
+	grp = ext4_get_group_info(sb, group);
+
+	/* Ensure that the group is loaded first */
+	ext4_mb_load_buddy(sb, group, &e4b);
+	ext4_mb_unload_buddy(&e4b);
+
+	ext4_lock_group(sb, group);
+
+	return 0;
+}
+
 static void
 ext4_evfs_inode_unlock(struct super_block * sb, struct evfs_lockable * lkb)
 {
@@ -1028,16 +1052,22 @@ ext4_evfs_inode_unlock(struct super_block * sb, struct evfs_lockable * lkb)
 }
 
 static void
-ext4_evfs_group_unlock(struct super_block * sb, struct evfs_lockable * lkb)
+ext4_evfs_ext_group_unlock(struct super_block * sb, struct evfs_lockable * lkb)
 {
-	struct ext4_group_info * grp;
 	ext4_group_t group;
 	ext4_grpblk_t offset;
 	unsigned long addr = lkb->object_id;
 
 	ext4_get_group_no_and_offset(sb, addr, &group, &offset);
 
-	grp = ext4_get_group_info(sb, group);
+	ext4_unlock_group(sb, group);
+}
+
+static void
+ext4_evfs_ino_group_unlock(struct super_block * sb, struct evfs_lockable * lkb)
+{
+	unsigned long ino = lkb->object_id;
+	ext4_group_t group = ino / EXT4_INODES_PER_GROUP(sb);
 
 	ext4_unlock_group(sb, group);
 }
@@ -1061,7 +1091,10 @@ ext4_evfs_lock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable)
 	case EVFS_TYPE_SUPER:
 		break;
 	case EVFS_TYPE_EXTENT_GROUP:
-		err = ext4_evfs_group_lock(aa->sb, lockable);
+		err = ext4_evfs_ext_group_lock(aa->sb, lockable);
+		break;
+	case EVFS_TYPE_INODE_GROUP:
+		err = ext4_evfs_ino_group_lock(aa->sb, lockable);
 		break;
 	case EVFS_TYPE_EXTENT:
 	case EVFS_TYPE_DIRENT:
@@ -1083,7 +1116,10 @@ ext4_evfs_unlock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable
 	case EVFS_TYPE_SUPER:
 		break;
 	case EVFS_TYPE_EXTENT_GROUP:
-		ext4_evfs_group_unlock(aa->sb, lockable);
+		ext4_evfs_ext_group_unlock(aa->sb, lockable);
+		break;
+	case EVFS_TYPE_INODE_GROUP:
+		ext4_evfs_ino_group_unlock(aa->sb, lockable);
 		break;
 	case EVFS_TYPE_EXTENT:
 	case EVFS_TYPE_DIRENT:
@@ -1106,12 +1142,15 @@ ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 	case EVFS_SUPER_INFO:
 		err = ext4_evfs_sb_get(aa->sb, op->data);
 		break;
+	case EVFS_EXTENT_ACTIVE:
+		err = ext4_evfs_extent_active(aa->sb, op->data);
+		break;
 	case EVFS_DIRENT_INFO:
 		break;
 	case EVFS_EXTENT_READ:
 		break;
 	case EVFS_INODE_READ:
-		err = -ENOSYS;
+		err = ext4_evfs_inode_read(aa->sb, op->data);
 		break;
 	case EVFS_INODE_UPDATE:
 		err = ext4_evfs_inode_set(aa->sb, op->data);
@@ -1141,7 +1180,7 @@ ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 }
 
 struct evfs_atomic_op ext4_evfs_atomic_ops = {
-    .prepare = ext4_evfs_prepare,
+	.prepare = ext4_evfs_prepare,
 	.lock = ext4_evfs_lock,
 	.unlock = ext4_evfs_unlock,
 	.execute = ext4_evfs_execute,
@@ -1167,15 +1206,13 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case FS_IOC_EXTENT_WRITE:
 		return ext4_evfs_extent_write(filp, sb, arg);
 	case FS_IOC_INODE_READ:
-		return ext4_evfs_inode_read(filp, sb, arg);
+		return ext4_evfs_inode_read(sb, (void *) arg);
 	case FS_IOC_INODE_MAP:
 		return ext4_evfs_inode_map(filp, sb, arg);
 	case FS_IOC_INODE_UNMAP:
 		return ext4_evfs_inode_unmap(filp, sb, arg);
 	case FS_IOC_INODE_ITERATE:
 		return ext4_evfs_inode_iter(filp, sb, arg);
-	case FS_IOC_EXTENT_ACTIVE:
-		return ext4_evfs_extent_active(filp, sb, arg);
 	case FS_IOC_EXTENT_FREE:
 		return ext4_evfs_extent_free(filp, sb, arg);
 	case FS_IOC_EXTENT_ITERATE:
