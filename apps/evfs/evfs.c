@@ -13,7 +13,6 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <stropts.h>
-#include "evfsctl.h"
 #include "evfslib.h"
 
 
