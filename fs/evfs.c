@@ -606,12 +606,12 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
                 evfs_add_lockable(lockable, EVFS_TYPE_SUPER, 0, 0, 0);
                 break;
             case EVFS_EXTENT_ACTIVE:
-                /* TODO: do we need to lock anything? */
+                /* TODO: do not need to lock here */
                 break;
-            case EVFS_DIRENT_INFO:
-            case EVFS_EXTENT_READ:
-                ret = -ENOSYS;
-                break;    
+            case EVFS_EXTENT_READ:     
+            case EVFS_EXTENT_WRITE:
+                /* may need to lock evfs_my_extent for multithreaded app */
+                break;  
             case EVFS_INODE_UPDATE:
             case EVFS_INODE_WRITE:
             case EVFS_INODE_MAP:
@@ -628,8 +628,8 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
                 ret = evfs_add_extent_lockable(lockable, 1, entry->data);
                 break;    
             case EVFS_INODE_ALLOC:
-            case EVFS_EXTENT_WRITE:
             case EVFS_DIRENT_ADD:
+            case EVFS_DIRENT_INFO:
             case EVFS_DIRENT_REMOVE:
             case EVFS_DIRENT_UPDATE:
             case EVFS_DIRENT_RENAME:
@@ -826,7 +826,7 @@ static inline struct evfs * evfs_get(struct file * filp)
     
     evfs = filp->private_data;
     if (evfs->magic != EVFS_MAGIC) {
-        printk("evfs warning: private_data does not start with EVFS_MAGIC.\n");
+        printk("evfs error: private_data does not start with EVFS_MAGIC.\n");
         return NULL;
     }
     
@@ -932,6 +932,55 @@ evfs_remove_my_extent(struct file * filp, const struct evfs_extent * ext)
     rb_erase(&ret->node, &evfs->my_extents);
     kfree(ret);
     return 1;    
+}
+
+long 
+__evfs_extent_in_range(struct evfs * evfs, const struct evfs_extent * ext)
+{
+    struct rb_root * root;
+    struct rb_node * node;
+    struct evfs_my_extent * myex = NULL;
+    unsigned long start, end, mystart, myend;
+    
+    root = &evfs->my_extents;
+    node = root->rb_node;
+    start = ext->addr;
+    end = ext->addr + ext->len;
+    
+    while (node) {
+        myex = rb_entry(node, struct evfs_my_extent, node);
+        mystart = myex->extent.addr;
+        myend = myex->extent.addr + myex->extent.len;        
+  
+        if (start >= mystart) {         
+            // ext is contained within myex
+            if (myend >= end) {
+                printk("(%lu, %lu) in (%lu, %lu)? yes\n", 
+                       start, end, mystart, myend);
+                return 1;
+            }
+        
+            node = node->rb_right;
+        }
+        else {
+            node = node->rb_left;
+        }
+        
+        printk("(%lu, %lu) in (%lu, %lu)? no\n", start, end, mystart, myend);
+    }
+
+    return 0;
+}
+
+long 
+evfs_extent_in_range(struct file * filp, const struct evfs_extent * ext)
+{
+    struct evfs * evfs = evfs_get(filp);
+    
+    if (!evfs)
+        return -EINVAL;
+    
+    return __evfs_extent_in_range(evfs, ext);
 }
 
 long 

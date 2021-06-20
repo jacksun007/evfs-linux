@@ -173,14 +173,26 @@ int extent_free(evfs_t * evfs, u64 pa, u64 len, int flags)
     return extent_operation(evfs, EVFS_EXTENT_FREE, pa, len, flags);
 }
 
-int extent_write(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len)
+int extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len)
+{
+    struct evfs_ext_write_op args;
+
+    args.addr = pa;
+    args.offset = off;
+    args.data = buf;
+    args.len = len;
+    
+    return evfs_operation(evfs, EVFS_EXTENT_WRITE, &args);
+}
+
+int extent_read(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len)
 {
     (void)evfs;
     (void)pa;
     (void)off;
     (void)buf;
     (void)len;
-    return -EINVAL;
+    return -ENOSYS;
 }
 
 int inode_info(evfs_t * evfs, struct evfs_inode * inode)

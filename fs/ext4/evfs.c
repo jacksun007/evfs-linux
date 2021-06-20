@@ -925,14 +925,14 @@ ext4_evfs_extent_write(struct file *filp, struct super_block *sb, unsigned long 
 		return -EFAULT;
 
 	iov.iov_base = write_op.data;
-	iov.iov_len = write_op.length;
-	iov_iter_init(&iter, WRITE, &iov, 1, write_op.length);
+	iov.iov_len = write_op.len;
+	iov_iter_init(&iter, WRITE, &iov, 1, write_op.len);
 
 	err = evfs_perform_write(sb, &iter, write_op.addr);
 	if (iov.iov_len != err) {
 		ext4_msg(sb, KERN_ERR, "evfs_extent_write: expected to write "
 				"%lu bytes, but wrote %d bytes instead",
-				write_op.length, err);
+				write_op.len, err);
 		return -EFAULT;
 	}
 	ext4_msg(sb, KERN_ERR, "err = %d", err);

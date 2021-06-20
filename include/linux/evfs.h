@@ -66,7 +66,8 @@ long evfs_run_atomic_action(struct file * filp,
 long evfs_open(struct file * filp, struct evfs_op * ops);
 int evfs_release(struct inode * inode, struct file * filp);
        
-const struct evfs_extent * evfs_find_my_extent(struct file * filp, u64 addr);        
+const struct evfs_extent * evfs_find_my_extent(struct file * filp, u64 addr); 
+long evfs_extent_in_range(struct file * filp, const struct evfs_extent * ext);       
 long evfs_add_my_extent(struct file * filp, const struct evfs_extent * ext);
 long evfs_remove_my_extent(struct file * filp, const struct evfs_extent * ext);
 long evfs_list_my_extents(struct file * filp);

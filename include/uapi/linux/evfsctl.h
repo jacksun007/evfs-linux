@@ -202,9 +202,10 @@ struct evfs_atomic_action_param {
 // not sure where this goes
 
 struct evfs_ext_write_op {
-    u32 addr;
-    unsigned long length;
-    char *data;
+    u64 addr;           // block address
+    u64 offset;         // byte offset
+    const char *data;   // data to be written
+    u64 len;            // length of data
 };
 
 /*

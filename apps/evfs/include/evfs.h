@@ -40,7 +40,8 @@ void iter_end(evfs_iter_t * it);
 int extent_alloc(evfs_t * evfs, u64 pa, u64 len, int flags);
 int extent_active(evfs_t * evfs, u64 pa, u64 len, int flags);
 int extent_free(evfs_t * evfs, u64 pa, u64 len, int flags);
-int extent_write(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len);
+int extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
+int extent_read(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len);
 
 // super block
 int super_info(evfs_t * evfs, struct evfs_super_block * sb);

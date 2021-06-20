@@ -431,33 +431,6 @@ f2fs_evfs_extent_active(struct super_block *sb, void __user * arg)
 	return ret;
 }
 
-long
-f2fs_evfs_extent_write(struct file *filp, struct super_block *sb, unsigned long arg)
-{
-	struct evfs_ext_write_op write_op;
-	struct iovec iov;
-	struct iov_iter iter;
-	int ret = 0;
-
-	if (copy_from_user(&write_op, (struct evfs_ext_write_op __user *) arg,
-				sizeof(struct evfs_ext_write_op)))
-		return -EFAULT;
-
-	iov.iov_base = write_op.data;
-	iov.iov_len = write_op.length;
-	iov_iter_init(&iter, WRITE, &iov, 1, write_op.length);
-
-	ret = evfs_perform_write(sb, &iter, write_op.addr);
-	if (iov.iov_len != ret) {
-		f2fs_msg(sb, KERN_ERR, "evfs_extent_write: expected to write "
-				"%lu bytes, but wrote %d bytes instead",
-				write_op.length, ret);
-		return -EFAULT;
-	}
-
-	return 0;
-}
-
 static long
 f2fs_evfs_extent_iter(struct file *filp, struct super_block *sb, unsigned long arg)
 {
@@ -1179,6 +1152,74 @@ f2fs_evfs_meta_move(struct super_block *sb, unsigned long arg)
 	return __metadata_move(sbi, op.md.blkaddr, op.to_blkaddr);
 }
 
+#define ceiling(a, b) (((a) + (b) - 1) / (b))
+
+static
+long
+f2fs_evfs_prepare_extent_write(struct file *filp, void __user * arg)
+{
+    struct super_block *sb = file_inode(filp)->i_sb;
+	struct f2fs_sb_info *sbi = F2FS_SB(sb);
+	struct evfs_ext_write_op write_op;
+    struct evfs_extent extent;
+    unsigned block_size = 1 << sbi->log_blocksize;
+    long ret;
+
+	if (copy_from_user(&write_op, arg, sizeof(struct evfs_ext_write_op)))
+		return -EFAULT;
+		
+    if (write_op.offset != 0) {
+        printk("evfs warning: writing at an offset current not supported.\n");
+        return -ENOSYS;
+    }
+    
+    extent.addr = write_op.addr;
+    extent.len  = ceiling(write_op.len, block_size);
+    
+    ret = evfs_extent_in_range(filp, &extent);
+    if (ret < 0)
+        return ret;
+    
+    if (!ret) {
+        printk("evfs info: cannot write to unowned extent (%llu, %llu)\n",
+            extent.addr, extent.len);
+        return -EINVAL;       
+    }
+    
+    return 0;
+}
+
+static
+long
+f2fs_evfs_extent_write(struct super_block *sb, void __user * arg)
+{
+#if 0
+	struct evfs_ext_write_op write_op;
+	struct iovec iov;
+	struct iov_iter iter;
+	int ret = 0;
+
+	if (copy_from_user(&write_op, (struct evfs_ext_write_op __user *) arg,
+				sizeof(struct evfs_ext_write_op)))
+		return -EFAULT;
+
+	iov.iov_base = write_op.data;
+	iov.iov_len = write_op.length;
+	iov_iter_init(&iter, WRITE, &iov, 1, write_op.length);
+
+	ret = evfs_perform_write(sb, &iter, write_op.addr);
+	if (iov.iov_len != ret) {
+		f2fs_msg(sb, KERN_ERR, "evfs_extent_write: expected to write "
+				"%lu bytes, but wrote %d bytes instead",
+				write_op.length, ret);
+		return -EFAULT;
+	}
+#endif
+    (void)sb;
+    (void)arg;
+    return 0;
+}
+
 static
 long
 f2fs_evfs_prepare_extent_alloc(struct super_block * sb, void * arg)
@@ -1482,7 +1523,10 @@ f2fs_evfs_prepare(struct evfs_atomic_action * aa, struct evfs_opentry * op)
             break;
         case EVFS_EXTENT_FREE:
             ret = f2fs_evfs_prepare_extent_free(aa->sb, op->data);
-            break;    
+            break;
+        case EVFS_EXTENT_WRITE:
+            ret = f2fs_evfs_prepare_extent_write(aa->filp, op->data);
+            break; 
         default:
             ret = 0;
     }
@@ -1562,25 +1606,25 @@ f2fs_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
     case EVFS_EXTENT_ACTIVE:
         err = f2fs_evfs_extent_active(aa->sb, op->data);
         break;
-    case EVFS_DIRENT_INFO:
-    case EVFS_INODE_ACTIVE:
-    case EVFS_EXTENT_READ:
-    case EVFS_INODE_READ:
-        err = -ENOSYS;
-        break;
     case EVFS_INODE_UPDATE:
         err = f2fs_evfs_inode_set(aa->sb, op->data);
-        break;    
-    case EVFS_SUPER_UPDATE:
-    case EVFS_DIRENT_UPDATE:
+        break;      
     case EVFS_EXTENT_ALLOC:
         err = f2fs_evfs_extent_alloc(aa->filp, op->data);
         break;
+    case EVFS_EXTENT_WRITE:
+        err = f2fs_evfs_extent_write(aa->sb, op->data);
+        break;    
     case EVFS_EXTENT_FREE:
         err = f2fs_evfs_extent_free(aa->filp, op->data);
-        break;    
+        break;
+    case EVFS_SUPER_UPDATE:
+    case EVFS_DIRENT_UPDATE:    
+    case EVFS_DIRENT_INFO:
+    case EVFS_INODE_ACTIVE:
+    case EVFS_EXTENT_READ:
+    case EVFS_INODE_READ:       
     case EVFS_INODE_ALLOC:
-    case EVFS_EXTENT_WRITE:
     case EVFS_INODE_WRITE:
     case EVFS_DIRENT_ADD:
     case EVFS_DIRENT_REMOVE:
@@ -1630,8 +1674,6 @@ f2fs_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	    return evfs_open(filp, &f2fs_evfs_ops);
 	case FS_IOC_LIST_MY_EXTENTS:
 	    return evfs_list_my_extents(filp);
-	case FS_IOC_EXTENT_WRITE:
-		return f2fs_evfs_extent_write(filp, sb, arg);
 	case FS_IOC_EXTENT_ITERATE:
 		return f2fs_evfs_extent_iter(filp, sb, arg);
 	case FS_IOC_INODE_ALLOC:
