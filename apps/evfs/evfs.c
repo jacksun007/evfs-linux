@@ -196,12 +196,12 @@ int inode_update(evfs_t * evfs, struct evfs_inode * inode)
 
 int inode_read(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len)
 {
-    (void)evfs;
-    (void)ino_nr;
-    (void)off;
-    (void)buf;
-    (void)len;
-    return -EINVAL;
+    struct evfs_inode_read_op op;
+    op.data = buf;
+    op.ino_nr = ino_nr;
+    op.length = len;
+    op.ofs = off;
+    return evfs_operation(evfs, EVFS_INODE_READ, &op);
 }
 
 int inode_map(evfs_t * evfs, u64 ino_nr, struct evfs_imap * imap)
