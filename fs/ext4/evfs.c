@@ -31,13 +31,13 @@
  * and bitmap_bh has been given write access by the caller.
  *
  * Returns 1 if the range of extents are active, and 0 if they are not.
- * Also uses evfs_query enum to indicate whether we should check for
+ * Also uses EVFS_ALL/EVFS_ANY to indicate whether we should check for
  * all extents in given range to be active, or at least one of them.
  *
  * If valid type is not provided, -EFAULT will be returned.
  */
 static inline int ext4_extent_check(struct ext4_free_extent fex,
-		struct buffer_head *bitmap_bh, enum evfs_query type)
+		struct buffer_head *bitmap_bh, int type)
 {
 	int i = 0;
 	if (type == EVFS_ANY) {
@@ -605,7 +605,7 @@ out:
 static long
 ext4_evfs_extent_active(struct super_block * sb, void __user * arg)
 {
-	struct evfs_extent_query op;
+	struct evfs_extent_op op;
 	struct ext4_free_extent fex;
 	struct buffer_head *bitmap_bh = NULL;
 	ext4_group_t group;
@@ -614,7 +614,7 @@ ext4_evfs_extent_active(struct super_block * sb, void __user * arg)
 	handle_t *handle = NULL;
 	int err = 0;
 
-	if (copy_from_user(&op, arg, sizeof(struct evfs_extent_query)))
+	if (copy_from_user(&op, arg, sizeof(struct evfs_extent_op)))
 		return -EFAULT;
 
 	block = op.extent.addr;
@@ -637,7 +637,7 @@ ext4_evfs_extent_active(struct super_block * sb, void __user * arg)
 	if (err)
 		goto out;
 
-	err = ext4_extent_check(fex, bitmap_bh, op.query);
+	err = ext4_extent_check(fex, bitmap_bh, op.flags);
 
 out:
 	brelse(bitmap_bh);
@@ -1213,8 +1213,6 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return ext4_evfs_inode_unmap(filp, sb, arg);
 	case FS_IOC_INODE_ITERATE:
 		return ext4_evfs_inode_iter(filp, sb, arg);
-	case FS_IOC_EXTENT_FREE:
-		return ext4_evfs_extent_free(filp, sb, arg);
 	case FS_IOC_EXTENT_ITERATE:
 		return ext4_evfs_extent_iter(filp, sb, arg);
 	}

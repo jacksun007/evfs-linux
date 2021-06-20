@@ -1,3 +1,14 @@
+/*
+ * linux/fs/evfs.c
+ *
+ * Implementation of generic Evfs interface
+ *
+ * Copyright (C) 2018
+ *
+ * Kyo-Keun Park
+ * Kuei Sun
+ */
+
 #include <linux/fs.h>
 #include <linux/evfs.h>
 #include <linux/sched.h>
@@ -523,7 +534,7 @@ evfs_add_inode_lockable(struct evfs_lockable * lk, int ex, void * arg)
 
 static
 long
-evfs_add_extent_group_lockable(struct evfs_lockable * lk, int ex, void * arg)
+__evfs_add_extent_lockable(struct evfs_lockable * lk, int t, int ex, void * arg)
 {
     struct evfs_extent extent;
 
@@ -533,8 +544,22 @@ evfs_add_extent_group_lockable(struct evfs_lockable * lk, int ex, void * arg)
         return -EFAULT;
     }
 
-    evfs_add_lockable(lk, EVFS_TYPE_EXTENT_GROUP, extent.addr, ex, extent.len);
-    return 0;
+    evfs_add_lockable(lk, t, extent.addr, ex, extent.len);
+    return 0;    
+}
+
+static
+long
+evfs_add_extent_group_lockable(struct evfs_lockable * lk, int ex, void * arg)
+{
+    return __evfs_add_extent_lockable(lk, EVFS_TYPE_EXTENT_GROUP, ex, arg);
+}
+
+static
+long
+evfs_add_extent_lockable(struct evfs_lockable * lk, int ex, void * arg)
+{
+    return __evfs_add_extent_lockable(lk, EVFS_TYPE_EXTENT, ex, arg);
 }
 
 static
@@ -590,6 +615,7 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
             case EVFS_INODE_UPDATE:
             case EVFS_INODE_WRITE:
             case EVFS_INODE_MAP:
+            case EVFS_INODE_FREE:
                 ret = evfs_add_inode_lockable(lockable, 1, entry->data);
                 break;
             case EVFS_SUPER_UPDATE:
@@ -598,6 +624,9 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
             case EVFS_EXTENT_ALLOC:
                 ret = evfs_add_extent_group_lockable(lockable, 1, entry->data);
                 break;
+            case EVFS_EXTENT_FREE:
+                ret = evfs_add_extent_lockable(lockable, 1, entry->data);
+                break;    
             case EVFS_INODE_ALLOC:
             case EVFS_EXTENT_WRITE:
             case EVFS_DIRENT_ADD:
@@ -635,10 +664,11 @@ evfs_execute_compare(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 }
 
 long
-evfs_run_atomic_action(struct super_block * sb, 
+evfs_run_atomic_action(struct file * filp, 
                        struct evfs_atomic_op *fop,
                        void * arg)
 {
+    struct inode *inode;
     struct evfs_atomic_action * aa;
     struct evfs_lockable * lk, * lkb;
     long ret;
@@ -650,7 +680,9 @@ evfs_run_atomic_action(struct super_block * sb,
         return ret;
     }
     
-    aa->sb = sb;
+    aa->filp = filp;
+    inode = file_inode(filp);
+    aa->sb = inode->i_sb;
     aa->fsop = fop;
     
     //printk("atomic_action: %d read, %d comp, %d write\n", 
@@ -730,4 +762,261 @@ fail:
     return ret;
 }
 
+/*
+ * evfs per-device extent/inode list
+ *
+ * keeps track of unmapped extents and unused inodes for clean-up 
+ * upon close() or program termination.
+ *
+ * TODO: add locks to support multi-threaded evfs application
+ *
+ */
+ 
+struct evfs_my_extent {
+    struct rb_node node;
+    struct evfs_extent extent;
+};
+
+struct evfs_my_inode {
+    struct rb_node node;
+    u64 ino_nr;
+};
+
+// ascii for EvfsUofT
+#define EVFS_MAGIC 0x54666f5573667645
+
+struct evfs {
+    unsigned long magic;    // for sanity check
+    struct rb_root my_extents;
+    struct rb_root my_inodes;
+    struct evfs_op * op;
+};
+
+
+
+long evfs_open(struct file * filp, struct evfs_op * fop)
+{
+    struct evfs * evfs;
+
+    if (filp->private_data) {
+        // TODO: not exactly the right errno but close enough...
+        return -EPERM;
+    }
+    
+    evfs = kmalloc(sizeof(struct evfs), GFP_KERNEL | GFP_NOFS);
+    if (!evfs)
+        return -ENOMEM;
+           
+    evfs->magic = EVFS_MAGIC; 
+    evfs->my_extents = RB_ROOT;
+    evfs->my_inodes = RB_ROOT;
+    evfs->op = fop;
+    filp->private_data = evfs;
+
+    return 0;
+}
+
+static inline struct evfs * evfs_get(struct file * filp)
+{
+    struct evfs * evfs;
+
+    if (!filp->private_data) {
+        return NULL;
+    }
+    
+    evfs = filp->private_data;
+    if (evfs->magic != EVFS_MAGIC) {
+        printk("evfs warning: private_data does not start with EVFS_MAGIC.\n");
+        return NULL;
+    }
+    
+    return evfs;
+}
+
+static 
+void
+evfs_free_my_extents(struct super_block * sb, struct evfs * evfs)
+{
+    struct evfs_my_extent * myex = NULL;
+    struct rb_root *root = &evfs->my_extents;
+    struct rb_node * node;
+    
+    
+    while ((node = rb_last(root)) != NULL) {
+        myex = rb_entry(node, struct evfs_my_extent, node);
+        printk("evfs: removing addr = %llu, len = %llu\n", 
+	           myex->extent.addr, myex->extent.len);
+	    evfs->op->free_extent(sb, &myex->extent);
+        rb_erase(node, root);
+        kfree(myex);
+    }
+}
+
+int evfs_release(struct inode * inode, struct file * filp)
+{
+    struct evfs * evfs = evfs_get(filp);    
+
+    if (evfs) {
+        filp->private_data = NULL;
+        evfs_free_my_extents(inode->i_sb, evfs);
+        kfree(evfs);
+    }
+    
+    return 0;
+}
+
+/* this function does exact match only */
+static
+struct evfs_my_extent *
+__evfs_find_my_extent(struct evfs * evfs, u64 addr)
+{
+    struct rb_root * root;
+    struct rb_node * node;
+    struct evfs_my_extent * myex = NULL;
+    
+    root = &evfs->my_extents;
+    node = root->rb_node;
+    
+    while (node) {
+        myex = rb_entry(node, struct evfs_my_extent, node);
+        
+        if (addr == myex->extent.addr) {
+            return myex;
+        }
+        else if (addr < myex->extent.addr) {
+            node = node->rb_left;
+        }
+        else {
+            node = node->rb_right;
+        }
+    }
+
+    return NULL;
+}
+
+const 
+struct evfs_extent *
+evfs_find_my_extent(struct file * filp, u64 addr)
+{
+    struct evfs_my_extent * ret;
+    struct evfs * evfs = evfs_get(filp);
+    
+    if (!evfs)
+        return NULL;
+    
+    ret = __evfs_find_my_extent(evfs, addr);
+    if (!ret)
+        return NULL;
+        
+    return &ret->extent;
+}
+
+long 
+evfs_remove_my_extent(struct file * filp, const struct evfs_extent * ext)
+{
+    struct evfs_my_extent * ret;
+    struct evfs * evfs = evfs_get(filp);
+    
+    if (!evfs)
+        return -EINVAL;
+    
+    ret = __evfs_find_my_extent(evfs, ext->addr);
+    if (!ret)
+        return 0;
+    
+    if (ret->extent.len != ext->len) {
+        printk("evfs warning: length mismatch during remove_my_extent\n");
+        return 0;
+    }
+    
+    rb_erase(&ret->node, &evfs->my_extents);
+    kfree(ret);
+    return 1;    
+}
+
+long 
+evfs_add_my_extent(struct file * filp, const struct evfs_extent * ext)
+{
+    struct evfs * evfs = evfs_get(filp);
+    struct rb_root * root;
+    struct rb_node ** new, * parent = NULL;
+    struct evfs_my_extent * myex = NULL;
+
+    if (!evfs)
+        return -EINVAL;
+        
+    root = &evfs->my_extents;
+    new = &root->rb_node;
+
+  	/* Figure out where to put new node */
+  	while (*new) {
+  		myex = container_of(*new, struct evfs_my_extent, node);
+
+		parent = *new;
+  		if (ext->addr < myex->extent.addr)
+  			new = &((*new)->rb_left);
+  		else if (ext->addr > myex->extent.addr)
+  			new = &((*new)->rb_right);
+  		else
+  			return 0;
+  	}
+
+  	myex = kmalloc(sizeof(struct evfs_my_extent), GFP_KERNEL | GFP_NOFS);
+  	if (!myex) {
+  	    return -ENOMEM;
+  	}
+  	
+  	/* Add new node and rebalance tree. */
+  	myex->extent = *ext;
+  	rb_link_node(&myex->node, parent, new);
+  	rb_insert_color(&myex->node, root);
+
+	return 1;
+}
+
+long evfs_list_my_extents(struct file * filp)
+{
+    struct evfs * evfs = evfs_get(filp);
+    struct rb_root *root;
+    struct rb_node *node;
+    struct evfs_my_extent * myex;
+    int count = 0;
+    
+    if (!evfs) {
+        printk("evfs: not opened via evfs_open\n");
+        return -EINVAL;
+    }
+    
+    root = &evfs->my_extents;    
+    for (node = rb_first(root); node; node = rb_next(node)) 
+    {
+        myex = rb_entry(node, struct evfs_my_extent, node);
+        count++;
+	    printk("%d: addr = %llu, len = %llu\n", 
+	            count, myex->extent.addr, myex->extent.len);
+	}
+	
+	printk("%d extents are owned by this evfs device\n", count);
+	return 0;
+}
+
+/*
+ * TODO: support tracking of inodes
+ */
+
+long 
+evfs_add_my_inode(struct file * filp, u64 ino_nr)
+{
+    (void)filp;
+    (void)ino_nr;
+    return -ENOSYS;
+}
+
+long 
+evfs_remove_my_inode(struct file * filp, u64 ino_nr)
+{
+    (void)filp;
+    (void)ino_nr;
+    return -ENOSYS;
+}
 

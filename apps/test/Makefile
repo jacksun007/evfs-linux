@@ -8,7 +8,7 @@ EVFSLIB=$(EVFSDIR)/libevfs.a
 LOADLIBES=-levfs
 CFLAGS=-Wall -Wextra -Werror -I$(EVFSDIR)/include -L../evfs -ggdb
 PROG=iinfo iup sbinfo iiter
-PROG=iinfo iset sbinfo exalloc exup iiter
+PROG=iinfo iset sbinfo exalloc exup exfree iiter myextest
 
 all: depend $(EVFSLIB) $(PROG)
 
@@ -28,7 +28,13 @@ exalloc: exalloc.o $(EVFSLIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
 
 exup: exup.o $(EVFSLIB)
-	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)    
+	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
+	
+exfree: exfree.o $(EVFSLIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)	
+	
+myextest: myextest.o $(EVFSLIB)
+	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
 
 #exfree: exfree.o $(EVFSLIB)
 #	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)   

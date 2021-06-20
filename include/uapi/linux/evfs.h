@@ -105,10 +105,10 @@ enum evfs_field {
     // TODO: add fields of other objects
 };
 
-// used by extent_active
-enum evfs_query {
+enum evfs_flag {
     EVFS_ANY = 1,
     EVFS_ALL = 2,
+    EVFS_FORCED = 3,
 };
 
 #endif // UAPI_EVFS_H_

@@ -52,15 +52,9 @@ struct __evfs_imap {
     unsigned long flag;
 };
 
-struct evfs_extent_alloc_op {
+struct evfs_extent_op {
     struct evfs_extent extent;
     u64 flags;
-};
-
-// TODO: this is the same as extent_alloc_op
-struct evfs_extent_query {
-    struct evfs_extent extent;
-    int query;
 };
 
 struct evfs_dirent_add_op {
@@ -222,12 +216,7 @@ struct evfs_ext_write_op {
  * TODO (jsun): clean-up everything. only EVFS_ACTION should be kept.
  *
  */
- 
-#define FS_IOC_INODE_LOCK _IOR('f', 64, long)
-#define FS_IOC_INODE_UNLOCK _IOR('f', 65, long)
-#define FS_IOC_EXTENT_ALLOC _IOWR('f', 66, struct evfs_extent_alloc_op)
-#define FS_IOC_EXTENT_ACTIVE _IOWR('f', 67, struct evfs_extent_query)
-#define FS_IOC_EXTENT_FREE _IOR('f', 68, struct evfs_extent)
+
 #define FS_IOC_EXTENT_WRITE _IOR('f', 69, struct evfs_extent)
 #define FS_IOC_INODE_ALLOC _IOWR('f', 70, struct evfs_inode)
 #define FS_IOC_INODE_FREE _IOWR('f', 71, long)
@@ -246,6 +235,8 @@ struct evfs_ext_write_op {
 #define FS_IOC_META_MOVE _IOR('f', 85, struct evfs_meta_mv_ops)
 #define FS_IOC_META_ITER _IOR('f', 86, struct evfs_iter_ops)
 #define FS_IOC_ATOMIC_ACTION _IOWR('f', 96, struct evfs_atomic_action_param)
+#define FS_IOC_EVFS_OPEN _IOR('f', 97, long)
+#define FS_IOC_LIST_MY_EXTENTS _IOR('f', 98, long)
 
 #endif // UAPI_EVFSCTL_H_
 

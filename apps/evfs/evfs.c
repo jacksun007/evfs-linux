@@ -145,33 +145,32 @@ int super_info(evfs_t * evfs, struct evfs_super_block * sb)
     return evfs_operation(evfs, EVFS_SUPER_INFO, sb);
 }
 
-int extent_alloc(evfs_t * evfs, u64 pa, u64 len, int flags)
+static
+int
+extent_operation(evfs_t * evfs, int type, u64 pa, u64 len, int flags)
 {
-    struct evfs_extent_alloc_op ext_op;
+    struct evfs_extent_op ext_op;
     
     ext_op.extent.addr = pa;
     ext_op.extent.len = len;
     ext_op.flags = flags;
 
-    return evfs_operation(evfs, EVFS_EXTENT_ALLOC, &ext_op);
+    return evfs_operation(evfs, type, &ext_op);
+}
+
+int extent_alloc(evfs_t * evfs, u64 pa, u64 len, int flags)
+{
+    return extent_operation(evfs, EVFS_EXTENT_ALLOC, pa, len, flags);
 }
 
 int extent_active(evfs_t * evfs, u64 pa, u64 len, int flags)
 {
-    struct evfs_extent_query ext_op;
-    
-    ext_op.query = flags;
-    ext_op.extent.addr = pa;
-    ext_op.extent.len = len;
-       
-    return evfs_operation(evfs, EVFS_EXTENT_ACTIVE, &ext_op);    
+    return extent_operation(evfs, EVFS_EXTENT_ACTIVE, pa, len, flags);   
 }
 
-int extent_free(evfs_t * evfs, u64 pa)
+int extent_free(evfs_t * evfs, u64 pa, u64 len, int flags)
 {
-    (void)evfs;
-    (void)pa;
-    return -EINVAL;
+    return extent_operation(evfs, EVFS_EXTENT_FREE, pa, len, flags);
 }
 
 int extent_write(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len)
@@ -234,8 +233,9 @@ void imap_free(evfs_t * evfs, struct evfs_imap * imap, int nofree)
     if (imap != NULL && !nofree) {
         // free all physical extents
         for (i = 0; i < imap->count; i++) {
-            if (imap->entry[i].phy_addr > 0) {
-                extent_free(evfs, imap->entry[i].phy_addr);
+            struct evfs_imentry * entry = &imap->entry[i];
+            if (entry->phy_addr > 0) {
+                extent_free(evfs, entry->phy_addr, entry->len, 0);
             }   
         }
 

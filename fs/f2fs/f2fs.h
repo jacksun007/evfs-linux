@@ -2370,9 +2370,6 @@ int build_segment_manager(struct f2fs_sb_info *sbi);
 void destroy_segment_manager(struct f2fs_sb_info *sbi);
 int __init create_segment_manager_caches(void);
 void destroy_segment_manager_caches(void);
-int reserve_extents(struct f2fs_sb_info *sbi, block_t start,
-		block_t length, int use_hint);
-void change_curseg(struct f2fs_sb_info *sbi, int type, bool reuse);
 
 /*
  * checkpoint.c

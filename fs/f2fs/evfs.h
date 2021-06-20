@@ -17,6 +17,9 @@
 
 // segment.c
 void update_sit_entry(struct f2fs_sb_info *sbi, block_t blkaddr, int del);
+void __invalidate_blocks(struct f2fs_sb_info *sbi, block_t addr);
+void change_curseg(struct f2fs_sb_info *sbi, int type, bool reuse);
+
 
 #endif /* F2FS_EVFS_H_ */
 

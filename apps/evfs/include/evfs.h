@@ -39,7 +39,7 @@ void iter_end(evfs_iter_t * it);
 //       and it hasn't been mapped to another inode.
 int extent_alloc(evfs_t * evfs, u64 pa, u64 len, int flags);
 int extent_active(evfs_t * evfs, u64 pa, u64 len, int flags);
-int extent_free(evfs_t * evfs, u64 pa);
+int extent_free(evfs_t * evfs, u64 pa, u64 len, int flags);
 int extent_write(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len);
 
 // super block
@@ -63,6 +63,9 @@ int atomic_const_equal(struct evfs_atomic * aa, int id, int field, u64 rhs);
 int atomic_execute(struct evfs_atomic * aa);
 void atomic_end(struct evfs_atomic * aa);
 long atomic_result(struct evfs_atomic * aa, int id);
+
+// debug functions
+void debug_my_extents(evfs_t * evfs);
 
 #endif // EVFS_H_
 

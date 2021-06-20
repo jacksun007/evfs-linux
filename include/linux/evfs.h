@@ -10,10 +10,17 @@
 
 // must come before evfs.h for definition of u64 type
 #include <linux/fs.h>
+#include <linux/rbtree.h>
 #include <uapi/linux/evfs.h>
 #include <uapi/linux/evfsctl.h>
 
 struct evfs_atomic_action;
+
+struct evfs_op {
+    // this should NOT be the execute function since it may require locking
+    long (* free_extent)(struct super_block *sb, const struct evfs_extent * ext);
+    long (* free_inode)(struct super_block *sb, u64 ino_nr);
+};
 
 // note that for dirent operations, the parent directory is locked
 struct evfs_lockable {
@@ -36,6 +43,7 @@ struct evfs_atomic_action {
 
     /* used by fs to execute the atomic action */
     struct super_block * sb;
+    struct file * filp;
     struct evfs_atomic_op * fsop;
 
     /* set to null if absent (e.g. read-only atomic action would not have
@@ -52,8 +60,16 @@ struct evfs_atomic_action {
 extern void d_drop_entry_in_dir(struct inode *, struct qstr *);
 
 /* fs/evfs.c */
-long evfs_run_atomic_action(struct super_block * sb,
+long evfs_run_atomic_action(struct file * filp,
                             struct evfs_atomic_op *fop, void * arg);              
+
+long evfs_open(struct file * filp, struct evfs_op * ops);
+int evfs_release(struct inode * inode, struct file * filp);
+       
+const struct evfs_extent * evfs_find_my_extent(struct file * filp, u64 addr);        
+long evfs_add_my_extent(struct file * filp, const struct evfs_extent * ext);
+long evfs_remove_my_extent(struct file * filp, const struct evfs_extent * ext);
+long evfs_list_my_extents(struct file * filp);
                             
 extern ssize_t evfs_page_read_iter(struct inode *, loff_t *, struct iov_iter *,
 		ssize_t, struct page *(*)(struct address_space *, pgoff_t));
