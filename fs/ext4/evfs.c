@@ -1157,7 +1157,7 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case FS_IOC_ATOMIC_ACTION:
-		return evfs_run_atomic_action(sb, &ext4_evfs_atomic_ops, (void *) arg);
+		return evfs_run_atomic_action(filp, &ext4_evfs_atomic_ops, (void *)arg);
 	case FS_IOC_DIRENT_ADD:
 		return dirent_add(filp, sb, arg);
 	case FS_IOC_DIRENT_REMOVE:

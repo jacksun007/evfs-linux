@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <assert.h>
+#include <string.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -19,6 +20,7 @@
 evfs_t * evfs_open(const char * dev)
 {
     evfs_t * evfs = malloc(sizeof(evfs_t));
+    long ret;
     
     if (!evfs) 
         return NULL;
@@ -27,11 +29,20 @@ evfs_t * evfs_open(const char * dev)
     evfs->fd = open(dev, O_RDONLY);
 	if (evfs->fd < 0) {
 		perror("open device");
-		free(evfs);
-		evfs = NULL;
+		goto fail;
+	}
+	
+	ret = ioctl(evfs->fd, FS_IOC_EVFS_OPEN, 0);
+	if (ret < 0) {
+	    fprintf(stderr, "error: cannot open '%s' as evfs device. %s\n", 
+	            dev, strerror(-ret));
+	    goto fail;
 	}
 	
     return evfs;
+fail:
+    free(evfs);
+    return NULL;
 }
 
 void evfs_close(evfs_t * evfs)
@@ -288,5 +299,10 @@ int imap_remove(struct evfs_imap * imap, u64 log_addr, int shift)
     (void)log_addr;
     (void)shift;
     return -EINVAL;
+}
+
+void debug_my_extents(evfs_t * evfs)
+{
+    ioctl(evfs->fd, FS_IOC_LIST_MY_EXTENTS, 0);
 }
 
