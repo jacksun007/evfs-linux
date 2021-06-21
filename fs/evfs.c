@@ -655,12 +655,92 @@ fail:
 
 static
 long
+evfs_get_inode_field_value(struct evfs_opentry * entry, int field, u64 * lhsp)
+{
+    struct evfs_inode inode;
+
+	if (copy_from_user(&inode, entry->data, sizeof(struct evfs_inode)))
+		return -EFAULT;
+
+    switch (field)
+    {
+    case EVFS_INODE_MTIME_TV_SEC:
+        *lhsp = inode.mtime.tv_sec;
+        break;
+    case EVFS_INODE_MTIME_TV_USEC:
+        *lhsp = inode.mtime.tv_usec;
+        break;
+    default:
+        return -EINVAL;
+    }
+
+    return 0;
+}
+
+static
+long
+evfs_get_field_value(struct evfs_opentry * entry, int field, u64 * lhsp)
+{
+    switch (entry->code)
+    {
+    case EVFS_INODE_INFO:
+        return evfs_get_inode_field_value(entry, field, lhsp);
+    case EVFS_SUPER_INFO:
+    case EVFS_DIRENT_INFO:
+    case EVFS_INODE_ACTIVE:
+    case EVFS_DIRENT_ACTIVE:
+    case EVFS_EXTENT_ACTIVE:
+        return -ENOSYS;
+    default:
+        // all other evfs operations cannot be used for comparison
+        return -EINVAL;
+    }
+    
+    return 0;
+}
+
+static
+long
+evfs_const_compare(struct evfs_atomic_action * aa, void __user * arg)
+{
+    struct evfs_const_comp comp;
+    struct evfs_opentry * entry;
+    u64 lhs;
+    long ret;
+
+    if (copy_from_user(&comp, arg, sizeof(struct evfs_const_comp)) != 0)
+        return -EFAULT;
+        
+    if (comp.id <= 0 || comp.id > aa->param.count)
+        return -EINVAL;
+        
+    entry = &aa->param.item[comp.id - 1];    
+    ret = evfs_get_field_value(entry, comp.field, &lhs);
+    if (ret < 0)
+        return ret;
+        
+    return (lhs == comp.rhs) ? 1 : 0;
+}
+
+static
+long
 evfs_execute_compare(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 {
-    // TODO: merge with refactored code
-    (void)aa;
-    (void)op;
-    return 0;
+    int ret = 0;
+
+    switch (op->code)
+    {
+    case EVFS_CONST_EQUAL:
+        ret = evfs_const_compare(aa, op->data);
+        break;
+    case EVFS_FIELD_EQUAL:
+        ret = -ENOSYS;
+        break;
+    default:
+        ret = -EINVAL;
+    }
+
+    return ret;
 }
 
 long
@@ -723,7 +803,8 @@ evfs_run_atomic_action(struct file * filp,
     for (k = 0; k < aa->nr_comp; k++) {
         ret = evfs_execute_compare(aa, aa->comp_set[k]);
         aa->comp_set[k]->result = ret;
-        if (ret < 0) {
+        // compare functions return 0 when comparison fails
+        if (ret <= 0) {
             aa->param.errop = aa->comp_set[k]->id;
             goto unlock;
         }

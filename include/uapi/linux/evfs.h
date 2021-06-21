@@ -94,11 +94,12 @@ struct evfs_imap {
 // TODO: put ALL the possible comparable fields here
 enum evfs_field {
     EVFS_FIELD_INVALID = 0,
+    EVFS_RETURN_VALUE,
 
     EVFS_INODE_FIELD_BEGIN,
 
-    EVFS_INODE_MTIME_SEC = EVFS_INODE_FIELD_BEGIN,
-    EVFS_INODE_MTIME_USEC,
+    EVFS_INODE_MTIME_TV_SEC = EVFS_INODE_FIELD_BEGIN,
+    EVFS_INODE_MTIME_TV_USEC,
 
     EVFS_INODE_FIELD_END,
 
