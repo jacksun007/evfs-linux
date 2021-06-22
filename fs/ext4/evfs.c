@@ -203,16 +203,11 @@ ext4_evfs_copy_timespec(struct evfs_timeval *to, struct timespec *from)
 }
 
 static long
-ext4_evfs_inode_free(struct file *filp, struct super_block *sb,
-		unsigned long arg)
+ext4_evfs_free_inode(struct super_block * sb, u64 ino_nr)
 {
-	struct inode *inode;
-	unsigned long ino_nr;
+	struct inode * inode;
 	long err = 0;
-	if (get_user(ino_nr, (unsigned long __user *) arg))
-		return -EFAULT;
 
-	ext4_msg(sb, KERN_ERR, "fetch inode %ld\n", ino_nr);
 	inode = ext4_iget_normal(sb, ino_nr);
 	if (IS_ERR(inode)) {
 		ext4_msg(sb, KERN_ERR, "iget failed during evfs");
@@ -225,7 +220,19 @@ ext4_evfs_inode_free(struct file *filp, struct super_block *sb,
 		err = -EBUSY;
 
 	iput(inode);
+
+	return -ENOSYS;
 	return err;
+}
+
+static long
+ext4_evfs_inode_free(struct super_block *sb, void __user * arg)
+{
+	unsigned long ino_nr;
+	if (get_user(ino_nr, (unsigned long __user *) arg))
+		return -EFAULT;
+
+	return ext4_evfs_free_inode(sb, ino_nr);
 }
 
 static long
@@ -618,7 +625,6 @@ ext4_evfs_extent_active(struct super_block * sb, void __user * arg)
 		return -EFAULT;
 
 	block = op.extent.addr;
-	printk("addr = %lu, len = %lu\n", block, op.extent.len);
 
 	ext4_get_group_no_and_offset(sb, block, &group, &off_block);
 
@@ -646,11 +652,9 @@ out:
 }
 
 static long
-ext4_evfs_extent_free(struct file *filp, struct super_block *sb,
-		unsigned long arg)
+__ext4_evfs_extent_free(struct super_block * sb, const struct evfs_extent * ext)
 {
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
-	struct evfs_extent op;
 	struct buffer_head *bitmap_bh = NULL;
 	struct ext4_group_desc *gdp;
 	struct buffer_head *gdp_bh;
@@ -663,26 +667,14 @@ ext4_evfs_extent_free(struct file *filp, struct super_block *sb,
 	handle_t *handle = NULL;
 	int err = 0, len;
 
-	if (copy_from_user(&op, (struct evfs_ext __user *) arg,
-				sizeof(struct evfs_extent)))
-		return -EFAULT;
-
-	block = op.addr;
+	block = ext->addr;
 
 	ext4_get_group_no_and_offset(sb, block, &group, &off_block);
 
 	fex.fe_start = off_block;
 	fex.fe_group = group;
-	fex.fe_len = op.len;
+	fex.fe_len = ext->len;
 
-	/*
-	 * NOTE (kyokeun): This uses the older method of reading the disk bitmap
-	 *                 to determine whether it has been allocated. This
-	 *                 bypasses some of the implications made by the
-	 *                 buddy cache and preallocation system which
-	 *                 Ext4 uses. Like extent allocate, this should use
-	 *                 buddy bitmap instead.
-	 */
 	bitmap_bh = ext4_read_block_bitmap(sb, group);
 	if (IS_ERR(bitmap_bh)) {
 		err = PTR_ERR(bitmap_bh);
@@ -698,9 +690,6 @@ ext4_evfs_extent_free(struct file *filp, struct super_block *sb,
 	if (!gdp)
 		goto out;
 
-	ext4_debug("using block group %u(%d)\n", group,
-			   ext4_free_group_clusters(sb, gdp));
-
 	BUFFER_TRACE(gdp_bh, "get_write_access");
 	err = ext4_journal_get_write_access(handle, gdp_bh);
 	if (err)
@@ -712,10 +701,7 @@ ext4_evfs_extent_free(struct file *filp, struct super_block *sb,
 		goto out;
 	}
 
-	ext4_lock_group(sb, group);
-
 	mb_free_blocks(NULL, &e4b, off_block, fex.fe_len);
-
 	mb_clear_bits(bitmap_bh->b_data, fex.fe_start, fex.fe_len);
 
 	len = ext4_free_group_clusters(sb, gdp) + fex.fe_len;
@@ -725,7 +711,6 @@ ext4_evfs_extent_free(struct file *filp, struct super_block *sb,
 	ext4_block_bitmap_csum_set(sb, group, gdp, bitmap_bh);
 	ext4_group_desc_csum_set(sb, group, gdp);
 
-	ext4_unlock_group(sb, group);
 	ext4_mb_unload_buddy(&e4b);
 	percpu_counter_add(&sbi->s_freeclusters_counter, fex.fe_len);
 
@@ -745,6 +730,36 @@ ext4_evfs_extent_free(struct file *filp, struct super_block *sb,
 out:
 	brelse(bitmap_bh);
 	return err;
+}
+
+static long
+ext4_evfs_free_extent(struct super_block * sb, const struct evfs_extent * ext)
+{
+	ext4_group_t group, start_group, end_group;
+	ext4_grpblk_t off;
+
+	ext4_get_group_no_and_offset(sb, ext->addr, &start_group, &off);
+	ext4_get_group_no_and_offset(sb, ext->addr + ext->len, &end_group, &off);
+
+	for (group = start_group; group <= end_group; group++)
+		ext4_lock_group(sb, group);
+	__ext4_evfs_extent_free(sb, ext);
+	for (group = start_group; group <= end_group; group++)
+		ext4_unlock_group(sb, group);
+
+	return 0;
+}
+
+static long
+ext4_evfs_extent_free(struct super_block * sb, void __user * arg)
+{
+	struct evfs_extent op;
+
+	if (copy_from_user(&op, (struct evfs_ext __user *) arg,
+				sizeof(struct evfs_extent)))
+		return -EFAULT;
+
+	return __ext4_evfs_extent_free(sb, &op);
 }
 
 static long
@@ -924,14 +939,14 @@ ext4_evfs_extent_write(struct file *filp, struct super_block *sb, unsigned long 
 					   sizeof(struct evfs_ext_write_op)))
 		return -EFAULT;
 
-	iov.iov_base = write_op.data;
+	iov.iov_base = (char *)write_op.data;
 	iov.iov_len = write_op.len;
 	iov_iter_init(&iter, WRITE, &iov, 1, write_op.len);
 
 	err = evfs_perform_write(sb, &iter, write_op.addr);
 	if (iov.iov_len != err) {
 		ext4_msg(sb, KERN_ERR, "evfs_extent_write: expected to write "
-				"%lu bytes, but wrote %d bytes instead",
+				"%llu bytes, but wrote %d bytes instead",
 				write_op.len, err);
 		return -EFAULT;
 	}
@@ -1019,7 +1034,7 @@ ext4_evfs_ino_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	if (!inode)
 		return -ENOSYS;
 	if (IS_ERR(inode))
-		return ERR_PTR(inode);
+		return PTR_ERR(inode);
 	iput(inode);
 
 	grp = ext4_get_group_info(sb, group);
@@ -1150,7 +1165,7 @@ ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 	case EVFS_EXTENT_READ:
 		break;
 	case EVFS_INODE_READ:
-		err = ext4_evfs_inode_read(aa->sb, op->data);
+		err = evfs_inode_read(aa->sb, op->data, &find_get_page);
 		break;
 	case EVFS_INODE_UPDATE:
 		err = ext4_evfs_inode_set(aa->sb, op->data);
@@ -1161,11 +1176,21 @@ ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 	case EVFS_EXTENT_ALLOC:
 		err = ext4_evfs_extent_alloc(aa->sb, op->data);
 		break;
+	case EVFS_EXTENT_FREE:
+		err = ext4_evfs_extent_free(aa->sb, op->data);
+		break;
 	case EVFS_INODE_ALLOC:
 		err = ext4_evfs_inode_alloc(aa->sb, op->data);
 		break;
+	case EVFS_INODE_FREE:
+		err = ext4_evfs_inode_free(aa->sb, op->data);
+		break;
 	case EVFS_EXTENT_WRITE:
+		err = -ENOSYS;
+		break;
 	case EVFS_INODE_WRITE:
+		err = evfs_inode_write(aa->sb, op->data, &find_get_page);
+		break;
 	case EVFS_DIRENT_ADD:
 	case EVFS_DIRENT_REMOVE:
 	case EVFS_DIRENT_RENAME:
@@ -1186,23 +1211,26 @@ struct evfs_atomic_op ext4_evfs_atomic_ops = {
 	.execute = ext4_evfs_execute,
 };
 
+struct evfs_op ext4_evfs_ops = {
+	.free_extent = ext4_evfs_free_extent,
+	.free_inode = ext4_evfs_free_inode,
+};
+
 long
 ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
 	struct super_block *sb = inode->i_sb;
-	unsigned long ino_nr;
-	long err;
 
 	switch (cmd) {
 	case FS_IOC_ATOMIC_ACTION:
 		return evfs_run_atomic_action(filp, &ext4_evfs_atomic_ops, (void *)arg);
+	case FS_IOC_EVFS_OPEN:
+		return evfs_open(filp, &ext4_evfs_ops);
 	case FS_IOC_DIRENT_ADD:
 		return dirent_add(filp, sb, arg);
 	case FS_IOC_DIRENT_REMOVE:
 		return dirent_remove(filp, sb, arg);
-	case FS_IOC_INODE_FREE:
-		return ext4_evfs_inode_free(filp, sb, arg);
 	case FS_IOC_EXTENT_WRITE:
 		return ext4_evfs_extent_write(filp, sb, arg);
 	case FS_IOC_INODE_READ:

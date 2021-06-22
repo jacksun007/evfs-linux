@@ -18,7 +18,11 @@
 #include <linux/uio.h>
 #include <linux/swap.h>
 #include <linux/gfp.h>
+#include <linux/kernel.h>
 
+/*
+ * Based off of do_generic_file_read in mm/filemap.c
+ */
 ssize_t
 evfs_page_read_iter(struct inode *inode, loff_t *ppos,
 		struct iov_iter *iter, ssize_t written,
@@ -232,6 +236,160 @@ out:
 	*ppos = ((loff_t)index << PAGE_SHIFT) + offset;
 	return written ? written : error;
 }
+
+/*
+ * Generic implementation of inode_read EVFS call. Since we are using VFS inode,
+ * most file systems shouild be able to utilize this.
+ */
+long
+evfs_inode_read(struct super_block * sb, void __user * arg,
+		struct page * (*page_cb)(struct address_space *, pgoff_t))
+{
+	struct evfs_inode_read_op read_op;
+	struct iovec iov;
+	struct iov_iter iter;
+	struct inode * inode;
+	int err = 0;
+
+	if (copy_from_user(&read_op, arg, sizeof(struct evfs_inode_read_op)))
+	    return -EFAULT;
+
+	inode = iget_locked(sb, read_op.ino_nr);
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
+
+	iov.iov_base = read_op.data;
+	iov.iov_len = read_op.length;
+	iov_iter_init(&iter, READ, &iov, 1, read_op.length);
+
+	err = evfs_page_read_iter(inode, (loff_t *)&read_op.ofs,
+				  &iter, 0, page_cb);
+
+	iput(inode);
+
+	if (err < 0)
+		return err;
+
+	return 0;
+}
+
+/*
+ * Based off of generic_perform_write in mm/filemap.c
+ */
+ssize_t
+evfs_page_write_iter(struct inode * inode, loff_t * ppos,
+		struct iov_iter * iter, ssize_t written,
+		struct page * (*page_cb)(struct address_space *, pgoff_t))
+{
+	struct address_space *mapping = inode->i_mapping;
+	const struct address_space_operations *a_ops = mapping->a_ops;
+	pgoff_t index;
+	pgoff_t last_index;
+	pgoff_t prev_index;
+	unsigned long offset;
+	unsigned int prev_offset;
+	long status = 0;
+
+	index = *ppos >> PAGE_SHIFT;
+	prev_index = index - 1;
+	prev_offset = prev_index << PAGE_SHIFT;
+	last_index = (*ppos + iter->count + PAGE_SIZE - 1) >> PAGE_SHIFT;
+	offset = *ppos & ~PAGE_MASK;
+
+	do {
+		struct page *page;
+		unsigned long offset;
+		unsigned long bytes;
+		ssize_t copied;
+		void *fsdata;
+
+		page = page_cb(mapping, index);
+
+		offset = (*ppos & (PAGE_SIZE - 1));
+		bytes = min_t(unsigned long, PAGE_SIZE - offset,
+			      iov_iter_count(iter));
+
+again:
+		if (unlikely(iov_iter_fault_in_readable(iter, 0))) {
+			status = -EFAULT;
+			break;
+		}
+
+		if (fatal_signal_pending(current)) {
+			status = -EINTR;
+			break;
+		}
+
+		status = a_ops->write_begin(NULL, mapping, *ppos, bytes, 0, &page, &fsdata);
+
+		if (unlikely(status < 0))
+			break;
+
+		if (mapping_writably_mapped(mapping))
+			flush_dcache_page(page);
+
+		copied = iov_iter_copy_from_user_atomic(page, iter, offset, bytes);
+		flush_dcache_page(page);
+
+		status = a_ops->write_end(NULL, mapping, *ppos, bytes, copied, page, fsdata);
+
+		if(unlikely(status < 0))
+			break;
+		copied = status;
+
+		cond_resched();
+
+		iov_iter_advance(iter, copied);
+		if (unlikely(copied == 0)) {
+			bytes = min_t(unsigned long, PAGE_SIZE - offset,
+				      iov_iter_single_seg_count(iter));
+			goto again;
+		}
+		*ppos += copied;
+		written += copied;
+
+		balance_dirty_pages_ratelimited(mapping);
+	} while(iov_iter_count(iter));
+
+	return written ? written : status;
+}
+
+/*
+ * Generic implementation of inode_write EVFS call. Since we are using VFS inode,
+ * most file systems shouild be able to utilize this.
+ */
+long
+evfs_inode_write(struct super_block * sb, void __user * arg,
+		struct page * (*page_cb)(struct address_space *, pgoff_t))
+{
+	struct evfs_inode_read_op read_op;
+	struct iovec iov;
+	struct iov_iter iter;
+	struct inode * inode;
+	int err = 0;
+
+	if (copy_from_user(&read_op, arg, sizeof(struct evfs_inode_read_op)))
+	    return -EFAULT;
+
+	inode = iget_locked(sb, read_op.ino_nr);
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
+
+	iov.iov_base = read_op.data;
+	iov.iov_len = read_op.length;
+	iov_iter_init(&iter, READ, &iov, 1, read_op.length);
+
+	err = evfs_page_write_iter(inode, (loff_t *)&read_op.ofs,
+				  &iter, 0, page_cb);
+
+	iput(inode);
+
+	if (err < 0)
+		return err;
+
+	return 0;
+}
+
 
 ssize_t
 evfs_perform_write(struct super_block *sb, struct iov_iter *i, pgoff_t pg_offset)
