@@ -1,7 +1,7 @@
 /*
- * exalloc.c
+ * myextest.c
  *
- * Tests extent_alloc
+ * Tests extent_alloc, extent_write, extent_free, and extent tracker
  *
  */
 

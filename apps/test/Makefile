@@ -1,50 +1,30 @@
 #
 # Makefile
 #
+# 06/25/2021: Updated to use wildcard and pattern rules so we don't have to 
+#             add new entries every single time. Should not need to be changed
+#             ever again.
+#
 
-CC=gcc
-EVFSDIR=../evfs
-EVFSLIB=$(EVFSDIR)/libevfs.a
-LOADLIBES=-levfs
-CFLAGS=-Wall -Wextra -Werror -I$(EVFSDIR)/include -L../evfs -ggdb
-PROG=iinfo iup sbinfo iiter
-PROG=iinfo iset sbinfo exalloc exup exfree iiter myextest iread iwrite
+CC := gcc
+EVFSDIR := ../evfs
+EVFSLIB := $(EVFSDIR)/libevfs.a
+LOADLIBES := -levfs
+CFLAGS := -Wall -Wextra -Werror -I$(EVFSDIR)/include -L../evfs -ggdb
+PROG := $(patsubst %.c,%,$(wildcard *.c))
 
-all: depend $(EVFSLIB) $(PROG)
+all: depend libevfs $(PROG)
 
-iinfo: iinfo.o $(EVFSLIB)
-	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
-
-iset: iset.o $(EVFSLIB)
-	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
-
-sbinfo: sbinfo.o $(EVFSLIB)
-	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
-
-iiter: iiter.o $(EVFSLIB)
-	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
-
-exalloc: exalloc.o $(EVFSLIB)
-	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
-
-exup: exup.o $(EVFSLIB)
-	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
-
-exfree: exfree.o $(EVFSLIB)
-	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)	
-
-myextest: myextest.o $(EVFSLIB)
-	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
-
-iread: iread.o $(EVFSLIB)
-	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
-
-iwrite: iwrite.o $(EVFSLIB)
-	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
-
+define PROG_RULE
+$(1): $(1).o $(EVFSLIB)
+	$(CC) $(CFLAGS) -o $(1) $(1).o $(LOADLIBES)
+endef 
+    
+$(foreach P,$(PROG),$(eval $(call PROG_RULE,$(P)))) 
+    
 # always execute
-.PHONY: $(EVFSLIB)
-$(EVFSLIB):
+.PHONY: libevfs
+libevfs:
 	cd $(EVFSDIR) && $(MAKE)
 
 .PHONY: clean
