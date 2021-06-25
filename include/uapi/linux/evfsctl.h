@@ -44,12 +44,19 @@ enum evfs_type {
 
 #define EVFS_IMAP_UNMAP_ONLY 0x1 /* Only unmap rather than free as well */
 
+// TODO: remove
 struct __evfs_imap {
     unsigned long ino_nr;
     u32 log_blkoff;
     u32 phy_blkoff;
     unsigned long length;
     unsigned long flag;
+};
+
+struct evfs_imap_op {
+    u64 ino_nr;
+    u64 flags;
+    struct evfs_imap * imap;
 };
 
 struct evfs_extent_op {

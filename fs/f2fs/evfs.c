@@ -507,111 +507,6 @@ out:
 	return ret;
 }
 
-long
-f2fs_evfs_inode_map(struct file *filp, struct super_block *sb, unsigned long arg)
-{
-	struct f2fs_sb_info *sbi = F2FS_SB(sb);
-	struct __evfs_imap evfs_i;
-	struct inode *inode;
-	struct f2fs_map_blocks map = { .m_next_pgofs = NULL };
-	int ret;
-
-	if (copy_from_user(&evfs_i, (struct __evfs_imap __user *) arg,
-				sizeof(struct __evfs_imap)))
-		return -EFAULT;
-
-	inode = f2fs_iget(sb, evfs_i.ino_nr);
-	if (IS_ERR(inode)) {
-		f2fs_msg(sb, KERN_ERR, "iget failed during evfs");
-		return PTR_ERR(inode);
-	} else if (!S_ISREG(inode->i_mode)) {
-		f2fs_msg(sb, KERN_ERR, "evfs_inode_map: "
-				"can only map extents to regular file");
-		iput(inode);
-		return -EINVAL;
-	}
-
-	if (!f2fs_extent_check(sbi, evfs_i.phy_blkoff,
-				evfs_i.length, EVFS_ALL)) {
-		f2fs_msg(sb, KERN_ERR, "evfs_inode_map: "
-				"given physical block range is not allocated");
-		ret = -EINVAL;
-		goto out;
-	}
-
-	ret = inode_newsize_ok(inode, i_size_read(inode) + evfs_i.length);
-	if (ret) {
-		f2fs_msg(sb, KERN_ERR, "evfs_inode_map: "
-				 "new inode size exceeds the size limit");
-		goto out;
-	}
-
-	if (f2fs_has_inline_data(inode)) {
-		f2fs_msg(sb, KERN_ERR, "evfs_inode_map: "
-				"inode contains inline data");
-		ret = -EINVAL;
-		goto out;
-	}
-
-	f2fs_balance_fs(sbi, true);
-
-	map.m_lblk = evfs_i.log_blkoff;
-	map.m_pblk = evfs_i.phy_blkoff;
-	map.m_len = evfs_i.length;
-
-	ret = f2fs_evfs_map_blocks(inode, &map);
-	if (ret) {
-		if (!map.m_len)
-			goto out;
-
-		/* TODO: Free the allocated blocks if it's partially complete */
-		f2fs_msg(sb, KERN_ERR, "evfs_inode_map: partially allocated, "
-				"hence freed");
-		goto out;
-	}
-
-out:
-	fsync_bdev(sb->s_bdev);
-	iput(inode);
-	return ret;
-}
-
-long
-f2fs_evfs_inode_unmap(struct file *filp, struct super_block *sb, unsigned long arg)
-{
-	struct __evfs_imap evfs_i;
-	struct inode *inode;
-	block_t blk_addr, start, len;
-
-	if (copy_from_user(&evfs_i, (struct __evfs_imap __user *) arg,
-				sizeof(struct __evfs_imap)))
-		return -EFAULT;
-
-	inode = f2fs_iget(sb, evfs_i.ino_nr);
-	if (IS_ERR(inode)) {
-		f2fs_msg(sb, KERN_ERR, "iget failed during evfs");
-		return PTR_ERR(inode);
-	} else if (!S_ISREG(inode->i_mode)) {
-		f2fs_msg(sb, KERN_ERR, "evfs_inode_unmap: "
-				"can only unmap extent from regular file");
-		return -EINVAL;
-	}
-
-	if (f2fs_has_inline_data(inode)) {
-		f2fs_msg(sb, KERN_ERR, "evfs_inode_unmap: "
-				"given inode contains inline data");
-	}
-
-	start = evfs_i.log_blkoff;
-	len = evfs_i.length;
-	for (blk_addr = start; blk_addr < start + len; blk_addr++) {
-		unmap_block(inode, blk_addr);
-	}
-
-	iput(inode);
-	return 0;
-}
-
 long f2fs_evfs_dirent_add(struct file *filp, struct super_block *sb,
 		unsigned long arg)
 {
@@ -823,6 +718,131 @@ f2fs_evfs_inode_read(struct file *filp, struct super_block *sb, unsigned long ar
 
 	iput(inode);
 	return 0;
+}
+
+static
+long
+f2fs_evfs_imap_entry(struct inode *inode, struct evfs_imentry * entry)
+{
+    struct super_block *sb = inode->i_sb;
+	struct f2fs_map_blocks map = { .m_next_pgofs = NULL };
+	int ret;
+	
+	// nothing needs to be done here -- we already unmapped
+	if (entry->phy_addr == 0) {
+	    return 0;
+	}
+
+    // TODO (jsun): this does not seem correct
+	ret = inode_newsize_ok(inode, i_size_read(inode) + entry->len);
+	if (ret) {
+		f2fs_msg(sb, KERN_ERR, "evfs_inode_map: "
+				 "new inode size exceeds the size limit");
+		return ret;
+	}
+
+	map.m_lblk = entry->log_addr;
+	map.m_pblk = entry->phy_addr;
+	map.m_len = entry->len;
+
+	ret = f2fs_evfs_map_blocks(inode, &map);
+	if (ret) {
+		if (!map.m_len)
+			return ret;
+		/* TODO: Free the allocated blocks if it's partially complete */
+		f2fs_msg(sb, KERN_ERR, "evfs_inode_map: partially allocated, "
+				"hence freed");
+		return ret;
+	}
+
+    return 0;
+}
+
+static 
+long
+f2fs_evfs_iunmap_entry(struct inode *inode, struct evfs_imentry * entry)
+{
+	block_t addr, start, end;
+
+	start = entry->log_addr;
+	end = start + entry->len;
+	
+	for (addr = start; addr < end; addr++) {
+		unmap_block(inode, addr);
+	}
+
+	return 0;
+}
+
+static
+long
+f2fs_evfs_inode_map(struct file * filp, void __user * arg)
+{
+    struct super_block *sb = file_inode(filp)->i_sb;
+    struct f2fs_sb_info *sbi = F2FS_SB(sb);
+    struct evfs_imap_op op;
+    struct evfs_imap * imap;
+    struct inode *inode;
+    long ret;
+    unsigned i;
+    
+    if (copy_from_user(&op, arg, sizeof(struct evfs_imap_op)) != 0)
+        return -EFAULT;
+ 
+    // check validity of inode before getting the imap
+    inode = f2fs_iget(sb, op.ino_nr);
+	if (IS_ERR(inode)) {
+		f2fs_msg(sb, KERN_ERR, "iget failed during evfs");
+		return -EINVAL;
+	} 
+	else if (!S_ISREG(inode->i_mode)) {
+		f2fs_msg(sb, KERN_ERR, "evfs_inode_unmap: "
+				"can only unmap extent from regular file");
+		ret = -EINVAL;
+		goto clean_inode;
+	}
+	else if (f2fs_has_inline_data(inode)) {
+	    // TODO: we should deal with this by removing the inline data
+		printk("evfs_inode_map: inode contains inline data\n");
+	    ret = -ENOSYS;
+		goto clean_inode;
+	}
+
+    // get the new mapping requested
+    ret = evfs_imap_from_user(&imap, op.imap);
+    if (ret < 0)
+        return ret;
+    
+    // unmap everything first before we map
+    for (i = 0; i < imap->count; i++) {
+        ret = f2fs_evfs_iunmap_entry(inode, &imap->entry[i]);
+        if (ret < 0)
+            goto clean_imap;
+    }
+    
+    // map all entries now
+    f2fs_balance_fs(sbi, true);
+    for (i = 0; i < imap->count; i++) {
+        struct evfs_extent extent;
+        ret = f2fs_evfs_imap_entry(inode, &imap->entry[i]);
+        if (ret < 0)
+            goto sync_bdev;
+            
+        // after successful map, we untrack the extent
+        evfs_imap_to_extent(&extent, &imap->entry[i]);
+        ret = evfs_remove_my_extent(filp, &extent);
+        if (ret < 0)
+            goto sync_bdev;
+    }
+    
+    ret = 0;
+sync_bdev:    
+    fsync_bdev(sb->s_bdev);
+clean_imap:    
+    kfree(imap);
+clean_inode:
+    iput(inode);
+    return ret;    
 }
 
 static
@@ -1517,18 +1537,22 @@ f2fs_evfs_prepare(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 {
     long ret = 0;
 
-    switch (op->code) {    
-        case EVFS_EXTENT_ALLOC:
-            ret = f2fs_evfs_prepare_extent_alloc(aa->sb, op->data);
-            break;
-        case EVFS_EXTENT_FREE:
-            ret = f2fs_evfs_prepare_extent_free(aa->sb, op->data);
-            break;
-        case EVFS_EXTENT_WRITE:
-            ret = f2fs_evfs_prepare_extent_write(aa->filp, op->data);
-            break; 
-        default:
-            ret = 0;
+    switch (op->code) {
+    case EVFS_INODE_MAP:
+        /* using generic prepare_inode_map */
+        ret = evfs_prepare_inode_map(aa->filp, op->data);
+        break;
+    case EVFS_EXTENT_ALLOC:
+        ret = f2fs_evfs_prepare_extent_alloc(aa->sb, op->data);
+        break;
+    case EVFS_EXTENT_FREE:
+        ret = f2fs_evfs_prepare_extent_free(aa->sb, op->data);
+        break;
+    case EVFS_EXTENT_WRITE:
+        ret = f2fs_evfs_prepare_extent_write(aa->filp, op->data);
+        break; 
+    default:
+        ret = 0;
     }
     
     return ret;
@@ -1608,7 +1632,10 @@ f2fs_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
         break;
     case EVFS_INODE_UPDATE:
         err = f2fs_evfs_inode_set(aa->sb, op->data);
-        break;      
+        break;
+    case EVFS_INODE_MAP:
+        err = f2fs_evfs_inode_map(aa->filp, op->data);
+        break;          
     case EVFS_EXTENT_ALLOC:
         err = f2fs_evfs_extent_alloc(aa->filp, op->data);
         break;
@@ -1629,7 +1656,6 @@ f2fs_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
     case EVFS_DIRENT_ADD:
     case EVFS_DIRENT_REMOVE:
     case EVFS_DIRENT_RENAME:
-    case EVFS_INODE_MAP:
     case EVFS_INODE_FREE:
         err = -ENOSYS;
         break;      
@@ -1676,30 +1702,8 @@ f2fs_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	    return evfs_list_my_extents(filp);
 	case FS_IOC_EXTENT_ITERATE:
 		return f2fs_evfs_extent_iter(filp, sb, arg);
-	case FS_IOC_INODE_ALLOC:
-		return f2fs_evfs_inode_alloc(filp, sb, arg);
-	case FS_IOC_INODE_FREE:
-		return f2fs_evfs_inode_free(filp, sb, arg);
-	case FS_IOC_INODE_STAT:
-		return f2fs_evfs_inode_stat(sb, arg);
-	case FS_IOC_INODE_READ:
-		return f2fs_evfs_inode_read(filp, sb, arg);
-	case FS_IOC_INODE_MAP:
-		return f2fs_evfs_inode_map(filp, sb, arg);
-	case FS_IOC_INODE_UNMAP:
-		return f2fs_evfs_inode_unmap(filp, sb, arg);
 	case FS_IOC_INODE_ITERATE:
 		return f2fs_evfs_inode_iter(filp, sb, arg);
-	case FS_IOC_DIRENT_ADD:
-		return f2fs_evfs_dirent_add(filp, sb, arg);
-	case FS_IOC_DIRENT_REMOVE:
-		return f2fs_evfs_dirent_remove(filp, sb, arg);
-	case FS_IOC_SUPER_SET:
-		return f2fs_evfs_sb_set(sb, arg);
-	case FS_IOC_META_MOVE:
-		return f2fs_evfs_meta_move(sb, arg);
-	case FS_IOC_META_ITER:
-		return f2fs_evfs_meta_iter(sb, arg);
 	}
 
 	return -ENOTTY;

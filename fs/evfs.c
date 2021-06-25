@@ -843,6 +843,97 @@ fail:
     return ret;
 }
 
+long evfs_imap_from_user(struct evfs_imap ** imptr, void __user * arg)
+{
+    u32 count;
+    int imap_bytes;
+    struct evfs_imap * imap;
+    
+    *imptr = NULL;
+    if (copy_from_user(&count, arg, sizeof(u32)))
+		return -EFAULT;
+		
+	imap_bytes = sizeof(struct evfs_imap) + count*sizeof(struct evfs_imentry);
+    imap = kmalloc(imap_bytes, GFP_KERNEL | GFP_NOFS);
+	if (!imap)
+	    return -ENOMEM;	
+		
+	if (copy_from_user(imap, arg, imap_bytes))
+		return -EFAULT;
+		
+	*imptr = imap;
+    return 0;
+}
+
+
+static
+long
+evfs_imap_validate_entry(struct file * filp, struct evfs_imentry * entry)
+{
+    const struct evfs_extent * ext;
+    
+    ext = evfs_find_my_extent(filp, entry->log_addr);
+    if (!ext)
+        return -EINVAL;
+    
+    // theoretically we should not make this check but it gets really
+    // ugly if we have to break up extents in the tracker
+    if (ext->len != entry->len) {
+        printk("evfs warning: extent length mismatch. expect %llu, "
+            "got %llu\n", ext->len, entry->len);
+        return -EINVAL;
+    }
+    
+    return 0;
+}
+
+long
+evfs_prepare_inode_map(struct file * filp, void __user * arg)
+{
+    struct evfs_imap_op op;
+    struct evfs_imap * imap;
+    struct evfs_imentry * last, * this;
+    long ret;
+    unsigned i;
+    
+    if (copy_from_user(&op, arg, sizeof(struct evfs_imap_op)) != 0)
+        return -EFAULT;
+ 
+    ret = evfs_imap_from_user(&imap, op.imap);
+    if (ret < 0)
+        return ret;
+  
+    // validate entries
+    last = &imap->entry[0];
+    if ((ret = evfs_imap_validate_entry(filp, last)) < 0)
+        goto fail;
+    
+    for (i = 1; i < imap->count; i++) {
+        u64 end;
+    
+        this = &imap->entry[i];
+        if ((ret = evfs_imap_validate_entry(filp, this)) < 0)
+            goto fail;
+
+        // check sortedness and no overlap
+        end = last->log_addr + last->len;
+        if (end > this->log_addr) {
+            printk("evfs warning: imap is either not sorted or has overlaps. "
+                "issue found at entry[%u] (la = %llu, pa = %llu, len = %llu)\n", 
+                this->log_addr, this->phy_addr, this->len);
+            ret = -EINVAL;
+            goto fail;
+        }
+        
+        last = this;
+    }
+    
+    ret = 0;
+fail:
+    kfree(imap);
+    return ret;
+}
+
 /*
  * evfs per-device extent/inode list
  *

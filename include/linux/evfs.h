@@ -71,12 +71,24 @@ long evfs_extent_in_range(struct file * filp, const struct evfs_extent * ext);
 long evfs_add_my_extent(struct file * filp, const struct evfs_extent * ext);
 long evfs_remove_my_extent(struct file * filp, const struct evfs_extent * ext);
 long evfs_list_my_extents(struct file * filp);
+
+// note: need to kfree the structure at end of function
+long evfs_imap_from_user(struct evfs_imap ** imptr, void __user * arg);
+long evfs_prepare_inode_map(struct file * filp, void __user * arg);
                             
 extern ssize_t evfs_page_read_iter(struct inode *, loff_t *, struct iov_iter *,
 		ssize_t, struct page *(*)(struct address_space *, pgoff_t));
 extern ssize_t evfs_perform_write(struct super_block *,
 		struct iov_iter *, pgoff_t);
 extern int evfs_copy_param(struct evfs_iter_ops *, const void *, int);
+
+static 
+inline void 
+evfs_imap_to_extent(struct evfs_extent * ex, struct evfs_imentry * im)
+{
+    ex->addr = im->phy_addr;
+    ex->len = im->len;
+}
 
 static inline void evfs_timeval_to_timespec(struct evfs_timeval *in,
 		struct timespec *out)
