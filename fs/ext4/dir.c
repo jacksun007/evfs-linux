@@ -24,6 +24,7 @@
 #include <linux/fs.h>
 #include <linux/buffer_head.h>
 #include <linux/slab.h>
+#include <linux/evfs.h>
 #include "ext4.h"
 #include "xattr.h"
 
@@ -618,6 +619,7 @@ static int ext4_dir_open(struct inode * inode, struct file * filp)
 
 static int ext4_release_dir(struct inode *inode, struct file *filp)
 {
+	evfs_release(inode, filp);
 	if (filp->private_data)
 		ext4_htree_free_dir_info(filp->private_data);
 

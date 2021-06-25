@@ -1,5 +1,5 @@
 /*
- * exup.c
+ * iread.c
  *
  * Tests inode_read
  *
@@ -20,7 +20,7 @@ int usage(char * prog)
     fprintf(stderr, "  DEV: device of the file system.\n");
     fprintf(stderr, "  NUM: inode number\n");
     fprintf(stderr, "  OFFSET: logical offset\n");
-    fprintf(stderr, "  LEN: length in bytes\n")
+    fprintf(stderr, "  LEN: length in bytes\n");
 
     return 1;
 }

@@ -215,6 +215,16 @@ int inode_read(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len)
     return evfs_operation(evfs, EVFS_INODE_READ, &op);
 }
 
+int inode_write(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len)
+{
+    struct evfs_inode_read_op op;
+    op.data = buf;
+    op.ino_nr = ino_nr;
+    op.length = len;
+    op.ofs = off;
+    return evfs_operation(evfs, EVFS_INODE_WRITE, &op);
+}
+
 int inode_map(evfs_t * evfs, u64 ino_nr, struct evfs_imap * imap)
 {
     struct evfs_imap_op op;
