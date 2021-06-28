@@ -1030,9 +1030,15 @@ evfs_imap_validate_entry(struct file * filp, struct evfs_imentry * entry)
 {
     const struct evfs_extent * ext;
     
-    ext = evfs_find_my_extent(filp, entry->log_addr);
-    if (!ext)
+    // this is an unmap request
+    if (entry->phy_addr == 0)
+        return 0;
+    
+    ext = evfs_find_my_extent(filp, entry->phy_addr);
+    if (!ext) {
+        printk("evfs warning: cannot find extent %llu\n", entry->phy_addr);
         return -EINVAL;
+    }
     
     // theoretically we should not make this check but it gets really
     // ugly if we have to break up extents in the tracker
@@ -1078,7 +1084,7 @@ evfs_prepare_inode_map(struct file * filp, void __user * arg)
         if (end > this->log_addr) {
             printk("evfs warning: imap is either not sorted or has overlaps. "
                 "issue found at entry[%u] (la = %llu, pa = %llu, len = %llu)\n", 
-                this->log_addr, this->phy_addr, this->len);
+                i, this->log_addr, this->phy_addr, this->len);
             ret = -EINVAL;
             goto fail;
         }

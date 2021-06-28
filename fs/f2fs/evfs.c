@@ -1180,12 +1180,12 @@ f2fs_evfs_prepare_extent_write(struct file *filp, void __user * arg)
 {
     struct super_block *sb = file_inode(filp)->i_sb;
 	struct f2fs_sb_info *sbi = F2FS_SB(sb);
-	struct evfs_ext_write_op write_op;
+	struct evfs_ext_rw_op write_op;
     struct evfs_extent extent;
     unsigned block_size = 1 << sbi->log_blocksize;
     long ret;
 
-	if (copy_from_user(&write_op, arg, sizeof(struct evfs_ext_write_op)))
+	if (copy_from_user(&write_op, arg, sizeof(struct evfs_ext_rw_op)))
 		return -EFAULT;
 		
     if (write_op.offset != 0) {
@@ -1213,30 +1213,26 @@ static
 long
 f2fs_evfs_extent_write(struct super_block *sb, void __user * arg)
 {
-#if 0
-	struct evfs_ext_write_op write_op;
+	struct evfs_ext_rw_op write_op;
 	struct iovec iov;
 	struct iov_iter iter;
-	int ret = 0;
+	long ret = 0;
 
-	if (copy_from_user(&write_op, (struct evfs_ext_write_op __user *) arg,
-				sizeof(struct evfs_ext_write_op)))
+	if (copy_from_user(&write_op, arg, sizeof(struct evfs_ext_rw_op)))
 		return -EFAULT;
 
-	iov.iov_base = write_op.data;
-	iov.iov_len = write_op.length;
-	iov_iter_init(&iter, WRITE, &iov, 1, write_op.length);
+	iov.iov_base = write_op.__data;
+	iov.iov_len = write_op.len;
+	iov_iter_init(&iter, WRITE, &iov, 1, write_op.len);
 
 	ret = evfs_perform_write(sb, &iter, write_op.addr);
 	if (iov.iov_len != ret) {
 		f2fs_msg(sb, KERN_ERR, "evfs_extent_write: expected to write "
-				"%lu bytes, but wrote %d bytes instead",
-				write_op.length, ret);
-		return -EFAULT;
+				"%llu bytes, but wrote %ld bytes instead",
+				write_op.len, ret);
+		return -EIO;
 	}
-#endif
-    (void)sb;
-    (void)arg;
+
     return 0;
 }
 

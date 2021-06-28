@@ -930,16 +930,15 @@ out:
 static long
 ext4_evfs_extent_write(struct file *filp, struct super_block *sb, unsigned long arg)
 {
-	struct evfs_ext_write_op write_op;
+	struct evfs_ext_rw_op write_op;
 	struct iovec iov;
 	struct iov_iter iter;
 	int err = 0;
 
-	if (copy_from_user(&write_op, (struct evfs_ext_write_op __user *) arg,
-					   sizeof(struct evfs_ext_write_op)))
+	if (copy_from_user(&write_op, (void *)arg, sizeof(struct evfs_ext_rw_op)))
 		return -EFAULT;
 
-	iov.iov_base = (char *)write_op.data;
+	iov.iov_base = write_op.__data;
 	iov.iov_len = write_op.len;
 	iov_iter_init(&iter, WRITE, &iov, 1, write_op.len);
 
