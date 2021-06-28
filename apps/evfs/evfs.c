@@ -175,11 +175,11 @@ int extent_free(evfs_t * evfs, u64 pa, u64 len, int flags)
 
 int extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len)
 {
-    struct evfs_ext_write_op args;
+    struct evfs_ext_rw_op args;
 
     args.addr = pa;
     args.offset = off;
-    args.data = buf;
+    args.wdata = buf;
     args.len = len;
     
     return evfs_operation(evfs, EVFS_EXTENT_WRITE, &args);
@@ -187,12 +187,14 @@ int extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len)
 
 int extent_read(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len)
 {
-    (void)evfs;
-    (void)pa;
-    (void)off;
-    (void)buf;
-    (void)len;
-    return -ENOSYS;
+    struct evfs_ext_rw_op args;
+
+    args.addr = pa;
+    args.offset = off;
+    args.rdata = buf;
+    args.len = len;
+    
+    return evfs_operation(evfs, EVFS_EXTENT_READ, &args);
 }
 
 int inode_info(evfs_t * evfs, struct evfs_inode * inode)
@@ -260,10 +262,10 @@ void imap_free(evfs_t * evfs, struct evfs_imap * imap, int nofree)
             if (entry->phy_addr > 0) {
                 extent_free(evfs, entry->phy_addr, entry->len, 0);
             }   
-        }
-
-        free(imap);
+        }   
     }
+    
+    free(imap);
 }
 
 struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr)

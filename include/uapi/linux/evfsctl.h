@@ -208,11 +208,15 @@ struct evfs_atomic_action_param {
 
 // not sure where this goes
 
-struct evfs_ext_write_op {
-    u64 addr;           // block address
-    u64 offset;         // byte offset
-    const char *data;   // data to be written
-    u64 len;            // length of data
+struct evfs_ext_rw_op {
+    u64 addr;               // block address
+    u64 offset;             // byte offset
+    union {
+        char * rdata;       // data to be read  
+        const char * wdata; // data to be written
+        char * __data;      // used by kernel (to avoid const warning)
+    };
+    u64 len;                // length of data
 };
 
 /*

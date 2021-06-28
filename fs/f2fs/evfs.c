@@ -1180,12 +1180,12 @@ f2fs_evfs_prepare_extent_write(struct file *filp, void __user * arg)
 {
     struct super_block *sb = file_inode(filp)->i_sb;
 	struct f2fs_sb_info *sbi = F2FS_SB(sb);
-	struct evfs_ext_write_op write_op;
+	struct evfs_ext_rw_op write_op;
     struct evfs_extent extent;
     unsigned block_size = 1 << sbi->log_blocksize;
     long ret;
 
-	if (copy_from_user(&write_op, arg, sizeof(struct evfs_ext_write_op)))
+	if (copy_from_user(&write_op, arg, sizeof(struct evfs_ext_rw_op)))
 		return -EFAULT;
 		
     if (write_op.offset != 0) {
