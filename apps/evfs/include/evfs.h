@@ -53,6 +53,8 @@ int inode_map(evfs_t * evfs, u64 ino_nr, struct evfs_imap * imap);
 int inode_read(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len);
 int inode_write(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len);
 
+int extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
+
 // inode mapping
 struct evfs_imap * imap_new(evfs_t * evfs);
 struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr);

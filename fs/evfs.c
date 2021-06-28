@@ -357,6 +357,8 @@ again:
 /*
  * Generic implementation of inode_write EVFS call. Since we are using VFS inode,
  * most file systems shouild be able to utilize this.
+ *
+ * BUG: Kernel panic few seconds after calling inode_write
  */
 long
 evfs_inode_write(struct super_block * sb, void __user * arg,
@@ -481,6 +483,35 @@ again:
 	fsync_bdev(sb->s_bdev);
 
 	return written ? written : status;
+}
+
+long
+evfs_extent_write(struct super_block * sb, void __user * arg)
+{
+	struct evfs_ext_write_op write_op;
+	struct iovec iov;
+	struct iov_iter iter;
+	size_t bytes;
+	int err = 0;
+
+	if (copy_from_user(&write_op, (struct evfs_ext_write_op __user *) arg,
+					   sizeof(struct evfs_ext_write_op)))
+		return -EFAULT;
+
+	bytes = write_op.len * PAGE_SIZE;
+	iov.iov_base = (char *)write_op.data;
+	iov.iov_len = bytes;
+	iov_iter_init(&iter, WRITE, &iov, 1, bytes);
+
+	err = evfs_perform_write(sb, &iter, write_op.addr);
+	if (iov.iov_len != err) {
+		printk("evfs_extent_write: expected to write "
+			"%lu bytes, but wrote %d bytes instead\n",
+				bytes, err);
+		return -EFAULT;
+	}
+	printk("extent write err = %d\n", err);
+	return 0;
 }
 
 /*

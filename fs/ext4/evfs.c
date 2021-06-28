@@ -647,7 +647,6 @@ ext4_evfs_extent_active(struct super_block * sb, void __user * arg)
 
 out:
 	brelse(bitmap_bh);
-	printk("returning %d\n", err);
 	return err;
 }
 
@@ -928,33 +927,6 @@ out:
 }
 
 static long
-ext4_evfs_extent_write(struct file *filp, struct super_block *sb, unsigned long arg)
-{
-	struct evfs_ext_write_op write_op;
-	struct iovec iov;
-	struct iov_iter iter;
-	int err = 0;
-
-	if (copy_from_user(&write_op, (struct evfs_ext_write_op __user *) arg,
-					   sizeof(struct evfs_ext_write_op)))
-		return -EFAULT;
-
-	iov.iov_base = (char *)write_op.data;
-	iov.iov_len = write_op.len;
-	iov_iter_init(&iter, WRITE, &iov, 1, write_op.len);
-
-	err = evfs_perform_write(sb, &iter, write_op.addr);
-	if (iov.iov_len != err) {
-		ext4_msg(sb, KERN_ERR, "evfs_extent_write: expected to write "
-				"%llu bytes, but wrote %d bytes instead",
-				write_op.len, err);
-		return -EFAULT;
-	}
-	ext4_msg(sb, KERN_ERR, "err = %d", err);
-	return 0;
-}
-
-static long
 ext4_evfs_sb_get(struct super_block * sb, void __user * arg)
 {
 	struct evfs_super_block evfs_sb;
@@ -1186,7 +1158,7 @@ ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 		err = ext4_evfs_inode_free(aa->sb, op->data);
 		break;
 	case EVFS_EXTENT_WRITE:
-		err = -ENOSYS;
+		err = evfs_extent_write(aa->sb, op->data);
 		break;
 	case EVFS_INODE_WRITE:
 		err = evfs_inode_write(aa->sb, op->data, &find_get_page);
@@ -1231,8 +1203,6 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return dirent_add(filp, sb, arg);
 	case FS_IOC_DIRENT_REMOVE:
 		return dirent_remove(filp, sb, arg);
-	case FS_IOC_EXTENT_WRITE:
-		return ext4_evfs_extent_write(filp, sb, arg);
 	case FS_IOC_INODE_READ:
 		return ext4_evfs_inode_read(sb, (void *) arg);
 	case FS_IOC_INODE_MAP:

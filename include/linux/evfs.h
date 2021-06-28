@@ -80,10 +80,12 @@ extern ssize_t evfs_page_read_iter(struct inode *, loff_t *, struct iov_iter *,
 		ssize_t, struct page *(*)(struct address_space *, pgoff_t));
 extern ssize_t evfs_page_write_iter(struct inode *, loff_t *, struct iov_iter *,
 		ssize_t, struct page *(*)(struct address_space *, pgoff_t));
-extern long  evfs_inode_read(struct super_block * sb, void __user * arg,
+extern long evfs_inode_read(struct super_block * sb, void __user * arg,
 		struct page * (*page_cb) (struct address_space *, pgoff_t));
-extern long  evfs_inode_write (struct super_block * sb, void __user * arg,
+extern long evfs_inode_write (struct super_block * sb, void __user * arg,
 		struct page * (*page_cb) (struct address_space *, pgoff_t));
+
+extern long evfs_extent_write(struct super_block * sb, void __user * arg);
 
 extern ssize_t evfs_perform_write(struct super_block *,
 		struct iov_iter *, pgoff_t);

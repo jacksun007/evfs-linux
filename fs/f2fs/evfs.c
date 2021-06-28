@@ -1211,37 +1211,6 @@ f2fs_evfs_prepare_extent_write(struct file *filp, void __user * arg)
 
 static
 long
-f2fs_evfs_extent_write(struct super_block *sb, void __user * arg)
-{
-#if 0
-	struct evfs_ext_write_op write_op;
-	struct iovec iov;
-	struct iov_iter iter;
-	int ret = 0;
-
-	if (copy_from_user(&write_op, (struct evfs_ext_write_op __user *) arg,
-				sizeof(struct evfs_ext_write_op)))
-		return -EFAULT;
-
-	iov.iov_base = write_op.data;
-	iov.iov_len = write_op.length;
-	iov_iter_init(&iter, WRITE, &iov, 1, write_op.length);
-
-	ret = evfs_perform_write(sb, &iter, write_op.addr);
-	if (iov.iov_len != ret) {
-		f2fs_msg(sb, KERN_ERR, "evfs_extent_write: expected to write "
-				"%lu bytes, but wrote %d bytes instead",
-				write_op.length, ret);
-		return -EFAULT;
-	}
-#endif
-    (void)sb;
-    (void)arg;
-    return 0;
-}
-
-static
-long
 f2fs_evfs_prepare_extent_alloc(struct super_block * sb, void * arg)
 {
     struct evfs_extent extent;
@@ -1640,7 +1609,7 @@ f2fs_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
         err = f2fs_evfs_extent_alloc(aa->filp, op->data);
         break;
     case EVFS_EXTENT_WRITE:
-        err = f2fs_evfs_extent_write(aa->sb, op->data);
+        err = evfs_extent_write(aa->sb, op->data);
         break;    
     case EVFS_EXTENT_FREE:
         err = f2fs_evfs_extent_free(aa->filp, op->data);
