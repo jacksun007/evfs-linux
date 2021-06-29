@@ -12,8 +12,6 @@
 #include <time.h>
 #include <evfs.h>
 
-#define BUFLEN 4096
-
 int usage(char * prog)
 {
     fprintf(stderr, "usage: %s DEV NUM OFFSET LEN\n", prog);
@@ -28,7 +26,7 @@ int usage(char * prog)
 int main(int argc, char * argv[])
 {
 	evfs_t * evfs = NULL;
-	char buf[BUFLEN + 1];
+	char * buf;
 	u64 ino_nr, off, len;
 	int ret;
 
@@ -42,7 +40,8 @@ int main(int argc, char * argv[])
 	off = (u64)atoi(argv[3]);
 	len = (u64)atoi(argv[4]);
 
-	memset(buf, 0, BUFLEN + 1);
+	buf = malloc(len + 1);
+	memset(buf, 0, len + 1);
 	ret = inode_read(evfs, ino_nr, off, buf, len);
 	if (ret < 0) {
 		fprintf(stderr, "error: cannot read inode %lu, errno = %s\n",
