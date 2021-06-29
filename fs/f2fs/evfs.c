@@ -768,6 +768,7 @@ f2fs_evfs_iunmap_entry(struct inode *inode, struct evfs_imentry * entry)
 	end = start + entry->len;
 	
 	for (addr = start; addr < end; addr++) {
+	    printk("unmapping la = %lu\n", addr);
 		unmap_block(inode, addr);
 	}
 
@@ -812,32 +813,41 @@ f2fs_evfs_inode_map(struct file * filp, void __user * arg)
     ret = evfs_imap_from_user(&imap, op.imap);
     if (ret < 0)
         return ret;
-    
-    // unmap everything first before we map
+ 
+    // unmap first before we map
     for (i = 0; i < imap->count; i++) {
+        // skip non-unmapping extents
+        if (imap->entry[i].phy_addr != 0)
+            continue;
+    
         ret = f2fs_evfs_iunmap_entry(inode, &imap->entry[i]);
         if (ret < 0)
             goto clean_imap;
-    }
+    }   
+    
+    printk("evfs info: finished unmapping all entries\n");
     
     // map all entries now
-    f2fs_balance_fs(sbi, true);
+    // f2fs_balance_fs(sbi, true);
     for (i = 0; i < imap->count; i++) {
         struct evfs_extent extent;
+        
+#if 0
         ret = f2fs_evfs_imap_entry(inode, &imap->entry[i]);
         if (ret < 0)
             goto sync_bdev;
+#endif
             
         // after successful map, we untrack the extent
         evfs_imap_to_extent(&extent, &imap->entry[i]);
         ret = evfs_remove_my_extent(filp, &extent);
         if (ret < 0)
-            goto sync_bdev;
+            goto clean_imap;
     }
     
     ret = 0;
-sync_bdev:    
-    fsync_bdev(sb->s_bdev);
+//sync_bdev:    
+//    fsync_bdev(sb->s_bdev);   
 clean_imap:    
     kfree(imap);
 clean_inode:
@@ -1502,6 +1512,7 @@ f2fs_evfs_inode_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	    inode_lock_shared(inode);
 	}
 	
+	printk("evfs info: locked inode %lu\n", inode->i_ino);
 	iput(inode);
 	return 0;
 }
@@ -1511,6 +1522,7 @@ void
 f2fs_evfs_inode_unlock(struct super_block * sb, struct evfs_lockable * lkb)
 {
     struct inode * inode = f2fs_iget(sb, lkb->object_id);
+    
 	if (IS_ERR(inode)) {
 	    panic("trying to unlock inode %lu but it does not exist!\n", 
 	        lkb->object_id);

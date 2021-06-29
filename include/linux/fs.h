@@ -58,6 +58,7 @@ struct workqueue_struct;
 struct iov_iter;
 struct fscrypt_info;
 struct fscrypt_operations;
+struct evfs;
 
 extern void __init inode_init(void);
 extern void __init inode_init_early(void);
@@ -875,6 +876,9 @@ struct file {
 #endif
 	/* needed for tty driver, and maybe others */
 	void			*private_data;
+	
+	/* used by evfs */
+	struct evfs 		*f_evfs;
 
 #ifdef CONFIG_EPOLL
 	/* Used by fs/eventpoll.c to link all the hooks to this file */

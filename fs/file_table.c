@@ -27,7 +27,7 @@
 #include <linux/task_work.h>
 #include <linux/ima.h>
 #include <linux/swap.h>
-
+#include <linux/evfs.h>
 #include <linux/atomic.h>
 
 #include "internal.h"
@@ -177,6 +177,7 @@ struct file *alloc_file(const struct path *path, fmode_t mode,
 		mode |= FMODE_CAN_WRITE;
 	file->f_mode = mode;
 	file->f_op = fop;
+	file->f_evfs = NULL;
 	if ((mode & (FMODE_READ | FMODE_WRITE)) == FMODE_READ)
 		i_readcount_inc(path->dentry->d_inode);
 	return file;
@@ -208,6 +209,8 @@ static void __fput(struct file *file)
 	ima_file_free(file);
 	if (file->f_op->release)
 		file->f_op->release(inode, file);
+	if (file->f_evfs)
+		evfs_release(inode, file);
 	security_file_free(file);
 	if (unlikely(S_ISCHR(inode->i_mode) && inode->i_cdev != NULL &&
 		     !(file->f_mode & FMODE_PATH))) {

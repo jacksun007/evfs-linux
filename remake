@@ -1,0 +1,3 @@
+#!/bin/sh
+
+make && sudo make install && sudo make modules_install && sudo reboot

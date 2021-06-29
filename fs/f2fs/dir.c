@@ -10,7 +10,6 @@
  */
 #include <linux/fs.h>
 #include <linux/f2fs_fs.h>
-#include <linux/evfs.h>
 #include "f2fs.h"
 #include "node.h"
 #include "acl.h"
@@ -912,7 +911,6 @@ const struct file_operations f2fs_dir_operations = {
 	.iterate_shared	= f2fs_readdir,
 	.fsync		= f2fs_sync_file,
 	.open		= f2fs_dir_open,
-	.release    = evfs_release,
 	.unlocked_ioctl	= f2fs_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl   = f2fs_compat_ioctl,

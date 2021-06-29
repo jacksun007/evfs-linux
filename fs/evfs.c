@@ -1118,11 +1118,7 @@ struct evfs_my_inode {
     u64 ino_nr;
 };
 
-// ascii for EvfsUofT
-#define EVFS_MAGIC 0x54666f5573667645
-
 struct evfs {
-    unsigned long magic;    // for sanity check
     struct rb_root my_extents;
     struct rb_root my_inodes;
     struct evfs_op * op;
@@ -1134,39 +1130,19 @@ long evfs_open(struct file * filp, struct evfs_op * fop)
 {
     struct evfs * evfs;
 
-    if (filp->private_data) {
-        // TODO: not exactly the right errno but close enough...
-        return -EPERM;
-    }
-    
+    if (filp->f_evfs != NULL)
+        return -EINVAL;
+
     evfs = kmalloc(sizeof(struct evfs), GFP_KERNEL | GFP_NOFS);
     if (!evfs)
         return -ENOMEM;
-           
-    evfs->magic = EVFS_MAGIC; 
+
     evfs->my_extents = RB_ROOT;
     evfs->my_inodes = RB_ROOT;
     evfs->op = fop;
-    filp->private_data = evfs;
+    filp->f_evfs = evfs;
 
     return 0;
-}
-
-static inline struct evfs * evfs_get(struct file * filp)
-{
-    struct evfs * evfs;
-
-    if (!filp->private_data) {
-        return NULL;
-    }
-    
-    evfs = filp->private_data;
-    if (evfs->magic != EVFS_MAGIC) {
-        printk("evfs error: private_data does not start with EVFS_MAGIC.\n");
-        return NULL;
-    }
-    
-    return evfs;
 }
 
 static 
@@ -1190,10 +1166,10 @@ evfs_free_my_extents(struct super_block * sb, struct evfs * evfs)
 
 int evfs_release(struct inode * inode, struct file * filp)
 {
-    struct evfs * evfs = evfs_get(filp);    
+    struct evfs * evfs = filp->f_evfs;
 
     if (evfs) {
-        filp->private_data = NULL;
+        filp->f_evfs = NULL;
         evfs_free_my_extents(inode->i_sb, evfs);
         kfree(evfs);
     }
@@ -1235,7 +1211,7 @@ struct evfs_extent *
 evfs_find_my_extent(struct file * filp, u64 addr)
 {
     struct evfs_my_extent * ret;
-    struct evfs * evfs = evfs_get(filp);
+    struct evfs * evfs = filp->f_evfs;
     
     if (!evfs)
         return NULL;
@@ -1251,7 +1227,7 @@ long
 evfs_remove_my_extent(struct file * filp, const struct evfs_extent * ext)
 {
     struct evfs_my_extent * ret;
-    struct evfs * evfs = evfs_get(filp);
+    struct evfs * evfs = filp->f_evfs;
     
     if (!evfs)
         return -EINVAL;
@@ -1311,7 +1287,7 @@ __evfs_extent_in_range(struct evfs * evfs, const struct evfs_extent * ext)
 long 
 evfs_extent_in_range(struct file * filp, const struct evfs_extent * ext)
 {
-    struct evfs * evfs = evfs_get(filp);
+    struct evfs * evfs = filp->f_evfs;
     
     if (!evfs)
         return -EINVAL;
@@ -1322,7 +1298,7 @@ evfs_extent_in_range(struct file * filp, const struct evfs_extent * ext)
 long 
 evfs_add_my_extent(struct file * filp, const struct evfs_extent * ext)
 {
-    struct evfs * evfs = evfs_get(filp);
+    struct evfs * evfs = filp->f_evfs;
     struct rb_root * root;
     struct rb_node ** new, * parent = NULL;
     struct evfs_my_extent * myex = NULL;
@@ -1361,7 +1337,7 @@ evfs_add_my_extent(struct file * filp, const struct evfs_extent * ext)
 
 long evfs_list_my_extents(struct file * filp)
 {
-    struct evfs * evfs = evfs_get(filp);
+    struct evfs * evfs = filp->f_evfs;
     struct rb_root *root;
     struct rb_node *node;
     struct evfs_my_extent * myex;
