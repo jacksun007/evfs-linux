@@ -89,12 +89,6 @@ struct evfs_inode_read_op {
     unsigned long length;
 };
 
-struct evfs_ext_write_op {
-    unsigned long len;
-    unsigned long addr;
-    char *data;
-};
-
 // all iteration operations 
 
 /*

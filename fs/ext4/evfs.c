@@ -373,8 +373,100 @@ ext4_evfs_inode_alloc(struct super_block * sb, void __user * arg)
 }
 
 static long
-ext4_evfs_inode_map(struct file *filp, struct super_block *sb,
-		unsigned long arg)
+ext4_evfs_imap_entry(struct inode * inode, struct evfs_imentry * entry)
+{
+	struct ext4_map_blocks map;
+	handle_t *handle = NULL;
+	long err = 0;
+
+	map.m_flags = EXT4_GET_BLOCKS_CREATE;
+	map.m_lblk = entry->log_addr;
+	map.m_pblk = entry->phy_addr;
+	map.m_len = entry->len;
+
+	err = ext4_ext_map_blocks(handle, inode, &map, EXT4_GET_BLOCKS_EVFS_MAP);
+	inode->i_blocks += entry->len;
+
+	fsync_bdev(inode->i_sb->s_bdev);
+	return err;
+}
+
+static long
+ext4_evfs_inode_map(struct file * filp, void __user * arg)
+{
+	struct super_block *sb = file_inode(filp)->i_sb;
+	struct evfs_imap_op op;
+	struct evfs_imap *imap;
+	struct inode *inode;
+	long err;
+	unsigned i;
+
+	if (copy_from_user(&op, arg, sizeof(struct evfs_imap_op)) != 0)
+		return -EFAULT;
+
+	/* Check validity of inode before getting the imap */
+	inode = ext4_iget_normal(sb, op.ino_nr);
+	if (IS_ERR(inode)) {
+		ext4_msg(sb, KERN_ERR, "iget failed during evfs");
+		return -EINVAL;
+	}
+	else if (!S_ISREG(inode->i_mode)) {
+		ext4_msg(sb, KERN_ERR, "evfs_inode_map: "
+				"can only map/unmap extents from regular file");
+		err = -EINVAL;
+		goto clean_inode;
+	}
+	else if (ext4_has_inline_data(inode)) {
+		/* TODO: Handle inline data by removing it */
+		ext4_msg(sb, KERN_ERR, "evfs_inode_map: "
+				"inode contains inline data");
+		err = -ENOSYS;
+		goto clean_inode;
+	}
+	else if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
+		/* TODO: Handle inodes that are not extent based as well */
+		ext4_msg(sb, KERN_ERR, "evfs_inode_map: "
+			"inode %ld is not extent based. Currently not supported",
+			inode->i_ino);
+		err = -ENOSYS;
+		goto clean_inode;
+	}
+
+	/* Get the new mapping requested */
+	err = evfs_imap_from_user(&imap, op.imap);
+	if (err < 0)
+		return err;
+
+	/* Unmap first before we map */
+	for (i = 0; i < imap->count; i++) {
+		/* Skip non-unmapping extents */
+		if (imap->entry[i].phy_addr)
+			continue;
+		err = ext4_ext_unmap_space(inode, imap->entry[i].log_addr,
+				imap->entry[i].log_addr + imap->entry[i].len);
+		if (err < 0)
+			goto clean_imap;
+	}
+
+	/* Map all entries now */
+	for (i = 0; i < imap->count; i++) {
+		struct evfs_extent extent;
+		evfs_imap_to_extent(&extent, &imap->entry[i]);
+		err = evfs_remove_my_extent(filp, &extent);
+		if (err < 0)
+			goto clean_imap;
+	}
+
+clean_imap:
+	kfree(imap);
+clean_inode:
+	iput(inode);
+	return err;
+}
+
+#if 0
+static long
+ext4_evfs_inode_map(struct super_block *sb, void __user * arg)
 {
 	struct __evfs_imap evfs_i;
 	struct inode *inode;
@@ -471,6 +563,7 @@ out:
 	iput(inode);
 	return err;
 }
+#endif
 
 /*
  * TODO: Currently no error when invalid request is received. Need to
@@ -1166,8 +1259,10 @@ ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 	case EVFS_DIRENT_ADD:
 	case EVFS_DIRENT_REMOVE:
 	case EVFS_DIRENT_RENAME:
-	case EVFS_INODE_MAP:
 		err = -ENOSYS;
+		break;
+	case EVFS_INODE_MAP:
+		err = ext4_evfs_inode_map(aa->filp, op->data);
 		break;
 	default:
 		printk("evfs: unknown opcode %d\n", op->code);
@@ -1205,8 +1300,6 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return dirent_remove(filp, sb, arg);
 	case FS_IOC_INODE_READ:
 		return ext4_evfs_inode_read(sb, (void *) arg);
-	case FS_IOC_INODE_MAP:
-		return ext4_evfs_inode_map(filp, sb, arg);
 	case FS_IOC_INODE_UNMAP:
 		return ext4_evfs_inode_unmap(filp, sb, arg);
 	case FS_IOC_INODE_ITERATE:

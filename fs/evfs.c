@@ -488,29 +488,30 @@ again:
 long
 evfs_extent_write(struct super_block * sb, void __user * arg)
 {
-	struct evfs_ext_write_op write_op;
+	struct evfs_ext_rw_op write_op;
 	struct iovec iov;
 	struct iov_iter iter;
+	ssize_t ret;
 	size_t bytes;
-	int err = 0;
+	long err = 0;
 
-	if (copy_from_user(&write_op, (struct evfs_ext_write_op __user *) arg,
-					   sizeof(struct evfs_ext_write_op)))
+	if (copy_from_user(&write_op, (struct evfs_ext_rw_op __user *) arg,
+					   sizeof(struct evfs_ext_rw_op)))
 		return -EFAULT;
 
 	bytes = write_op.len * PAGE_SIZE;
-	iov.iov_base = (char *)write_op.data;
+	iov.iov_base = (char *)write_op.__data;
 	iov.iov_len = bytes;
 	iov_iter_init(&iter, WRITE, &iov, 1, bytes);
 
-	err = evfs_perform_write(sb, &iter, write_op.addr);
-	if (iov.iov_len != err) {
+	ret = evfs_perform_write(sb, &iter, write_op.addr);
+	if (iov.iov_len != ret) {
 		printk("evfs_extent_write: expected to write "
-			"%lu bytes, but wrote %d bytes instead\n",
-				bytes, err);
+			"%lu bytes, but wrote %ld bytes instead\n",
+				bytes, ret);
 		return -EFAULT;
 	}
-	printk("extent write err = %d\n", err);
+	printk("extent write err = %lu\n", err);
 	return 0;
 }
 
