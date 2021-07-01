@@ -669,12 +669,12 @@ fail:
 } while(0)
 
 static
-void
+struct evfs_lockable *
 evfs_add_lockable(struct evfs_lockable * lk, int type, unsigned long id, 
                   int ex, unsigned long data)
 {
     struct evfs_lockable * lkb = lk;
-    
+
     while (lkb->type != EVFS_TYPE_INVALID) {
         
         /* we found a duplicate entry */
@@ -690,7 +690,7 @@ evfs_add_lockable(struct evfs_lockable * lk, int type, unsigned long id,
                        " data in lock set\n");
             }
         
-            return;
+            return lkb;
         }
     
         lkb++;
@@ -703,8 +703,8 @@ evfs_add_lockable(struct evfs_lockable * lk, int type, unsigned long id,
     lkb->data = data;
     
     /* invalidate last entry */
-    lkb++;
-    INVALIDATE_LOCKABLE(lkb);
+    INVALIDATE_LOCKABLE(lkb + 1);
+    return lkb;
 }
 
 static
@@ -723,30 +723,31 @@ evfs_add_inode_lockable(struct evfs_lockable * lk, int ex, void * arg)
 }
 
 static
-long
+struct evfs_lockable *
 __evfs_add_extent_lockable(struct evfs_lockable * lk, int t, int ex, void * arg)
 {
     struct evfs_extent extent;
+    struct evfs_lockable *lkb;
 
     long ret = copy_from_user(&extent, (struct evfs_extent __user *)arg, 
                          sizeof(struct evfs_extent));
     if (ret != 0) {
-        return -EFAULT;
+	return ERR_PTR(-EFAULT);
     }
 
-    evfs_add_lockable(lk, t, extent.addr, ex, extent.len);
-    return 0;    
+    lkb = evfs_add_lockable(lk, t, extent.addr, ex, extent.len);
+    return lkb;
 }
 
 static
-long
+struct evfs_lockable *
 evfs_add_extent_group_lockable(struct evfs_lockable * lk, int ex, void * arg)
 {
     return __evfs_add_extent_lockable(lk, EVFS_TYPE_EXTENT_GROUP, ex, arg);
 }
 
 static
-long
+struct evfs_lockable *
 evfs_add_extent_lockable(struct evfs_lockable * lk, int ex, void * arg)
 {
     return __evfs_add_extent_lockable(lk, EVFS_TYPE_EXTENT, ex, arg);
@@ -772,6 +773,7 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
 
     for (i = 0; i < aa->param.count; i++) {
         struct evfs_opentry * entry = &aa->param.item[i];
+	struct evfs_lockable * curr_lk;
         
         if (IS_EVFS_COMP_OP(entry->code)) {
             continue;
@@ -812,10 +814,22 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
                 evfs_add_lockable(lockable, EVFS_TYPE_SUPER, 0, 0, 0);
                 break;          
             case EVFS_EXTENT_ALLOC:
-                ret = evfs_add_extent_group_lockable(lockable, 1, entry->data);
+                curr_lk = evfs_add_extent_group_lockable(lockable, 1, entry->data);
+		if (IS_ERR(curr_lk)) {
+			ret = PTR_ERR(curr_lk);
+		} else {
+			entry->lkb = curr_lk;
+			ret = 0;
+		}
                 break;
             case EVFS_EXTENT_FREE:
-                ret = evfs_add_extent_lockable(lockable, 1, entry->data);
+                curr_lk = evfs_add_extent_lockable(lockable, 1, entry->data);
+		if (IS_ERR(curr_lk)) {
+			ret = PTR_ERR(curr_lk);
+		} else {
+			entry->lkb = curr_lk;
+			ret = 0;
+		}
                 break;    
             case EVFS_INODE_ALLOC:
             case EVFS_DIRENT_ADD:
@@ -974,9 +988,7 @@ evfs_run_atomic_action(struct file * filp,
                    lkb->type, lkb->object_id);
             goto unlock;
         }
-             
-        //printk("locked: type = %u, id = %lu, exclusive = %d\n",
-        //    lkb->type, lkb->object_id, lkb->exclusive); 
+	printk("lkb->object_id = %lu\n", lkb->object_id);
         i++; lkb++;
     }
     

@@ -197,6 +197,7 @@ struct evfs_opentry {
     int id;
     void * data;
     u64 result;
+    struct evfs_lockable * lkb; /* lockable associated to this entry */
 };
 
 struct evfs_atomic_action_param {

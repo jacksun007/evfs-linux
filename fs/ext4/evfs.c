@@ -621,8 +621,7 @@ ext4_evfs_inode_unmap(struct file *filp, struct super_block *sb,
 }
 
 static long
-ext4_evfs_inode_iter(struct file *filp, struct super_block *sb,
-		unsigned long arg)
+ext4_evfs_inode_iter(struct super_block * sb, void __user * arg)
 {
 	struct evfs_iter_ops iter;
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
@@ -855,10 +854,11 @@ ext4_evfs_extent_free(struct super_block * sb, void __user * arg)
 }
 
 static long
-ext4_evfs_extent_alloc(struct super_block * sb, void __user * arg)
+ext4_evfs_extent_alloc(struct super_block * sb, struct evfs_opentry * op)
 {
 	struct evfs_extent extent;
 	struct ext4_allocation_context ac;
+	void __user * arg = op->data;
 	handle_t *handle = NULL;
 	ext4_group_t group, max_groups = ext4_get_groups_count(sb);
 	ext4_grpblk_t off_block;
@@ -867,6 +867,14 @@ ext4_evfs_extent_alloc(struct super_block * sb, void __user * arg)
 	if (copy_from_user(&extent, (struct evfs_extent __user *) arg,
 				sizeof(extent)))
 		return -EFAULT;
+
+	if (!extent.addr) {
+		if (!op->lkb->object_id) {
+			ext4_msg(sb, KERN_ERR, "Both extent address and lockable address is NULL");
+			return -ENOMEM;
+		}
+		extent.addr = op->lkb->object_id;
+	}
 
 	ext4_get_group_no_and_offset(sb, extent.addr, &group, &off_block);
 
@@ -912,12 +920,10 @@ ext4_evfs_extent_alloc(struct super_block * sb, void __user * arg)
 
 out:
 	return err;
-
 }
 
 static long
-ext4_evfs_extent_iter(struct file *filp, struct super_block *sb,
-		unsigned long arg)
+ext4_evfs_extent_iter(struct super_block * sb, void __user * arg)
 {
 	struct evfs_iter_ops iter;
 	struct evfs_extent param = { 0 };
@@ -1064,9 +1070,18 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 
 	ext4_get_group_no_and_offset(sb, addr, &group, &offset);
 
-	/* for now, just support inflexible allocation */
 	if (!addr) {
-		return -ENOSYS;
+		for (group = 0; group < ext4_get_groups_count(sb); group++) {
+			grp = ext4_get_group_info(sb, group);
+			if (len <= grp->bb_free) {
+				lkb->object_id = group * EXT4_BLOCKS_PER_GROUP(sb)
+					+ grp->bb_first_free;
+				printk("extent group lock object id = %lu\n", lkb->object_id);
+				printk("bb_first_free = %lu\n", grp->bb_first_free);
+				goto lock;
+			}
+		}
+		return -ENOMEM;
 	}
 
 	grp = ext4_get_group_info(sb, group);
@@ -1077,6 +1092,7 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 		return -ENOMEM;
 	}
 
+lock:
 	/* Ensure that the group is loaded first */
 	ext4_mb_load_buddy(sb, group, &e4b);
 	ext4_mb_unload_buddy(&e4b);
@@ -1239,7 +1255,7 @@ ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 	case EVFS_DIRENT_UPDATE:
 		break;
 	case EVFS_EXTENT_ALLOC:
-		err = ext4_evfs_extent_alloc(aa->sb, op->data);
+		err = ext4_evfs_extent_alloc(aa->sb, op);
 		break;
 	case EVFS_EXTENT_FREE:
 		err = ext4_evfs_extent_free(aa->sb, op->data);
@@ -1294,18 +1310,10 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return evfs_run_atomic_action(filp, &ext4_evfs_atomic_ops, (void *)arg);
 	case FS_IOC_EVFS_OPEN:
 		return evfs_open(filp, &ext4_evfs_ops);
-	case FS_IOC_DIRENT_ADD:
-		return dirent_add(filp, sb, arg);
-	case FS_IOC_DIRENT_REMOVE:
-		return dirent_remove(filp, sb, arg);
-	case FS_IOC_INODE_READ:
-		return ext4_evfs_inode_read(sb, (void *) arg);
-	case FS_IOC_INODE_UNMAP:
-		return ext4_evfs_inode_unmap(filp, sb, arg);
 	case FS_IOC_INODE_ITERATE:
-		return ext4_evfs_inode_iter(filp, sb, arg);
+		return ext4_evfs_inode_iter(sb, (void *) arg);
 	case FS_IOC_EXTENT_ITERATE:
-		return ext4_evfs_extent_iter(filp, sb, arg);
+		return ext4_evfs_extent_iter(sb, (void *) arg);
 	}
 
 	return -ENOTTY;
