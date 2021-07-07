@@ -485,6 +485,10 @@ again:
 	return written ? written : status;
 }
 
+/*
+ * TODO: Need to add a flag to request length of page size granularity,
+ *       rather than byte-granularity (default).
+ */
 long
 evfs_extent_write(struct super_block * sb, void __user * arg)
 {
@@ -492,26 +496,22 @@ evfs_extent_write(struct super_block * sb, void __user * arg)
 	struct iovec iov;
 	struct iov_iter iter;
 	ssize_t ret;
-	size_t bytes;
-	long err = 0;
 
 	if (copy_from_user(&write_op, (struct evfs_ext_rw_op __user *) arg,
 					   sizeof(struct evfs_ext_rw_op)))
 		return -EFAULT;
 
-	bytes = write_op.len * PAGE_SIZE;
 	iov.iov_base = (char *)write_op.__data;
-	iov.iov_len = bytes;
-	iov_iter_init(&iter, WRITE, &iov, 1, bytes);
+	iov.iov_len = write_op.len;
+	iov_iter_init(&iter, WRITE, &iov, 1, write_op.len);
 
 	ret = evfs_perform_write(sb, &iter, write_op.addr);
 	if (iov.iov_len != ret) {
 		printk("evfs_extent_write: expected to write "
-			"%lu bytes, but wrote %ld bytes instead\n",
-				bytes, ret);
+			"%llu bytes, but wrote %ld bytes instead\n",
+				write_op.len, ret);
 		return -EFAULT;
 	}
-	printk("extent write err = %lu\n", err);
 	return 0;
 }
 
@@ -1232,10 +1232,10 @@ __evfs_find_my_extent(struct evfs * evfs, u64 addr)
     
     root = &evfs->my_extents;
     node = root->rb_node;
-    
+
     while (node) {
         myex = rb_entry(node, struct evfs_my_extent, node);
-        
+
         if (addr == myex->extent.addr) {
             return myex;
         }
