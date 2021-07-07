@@ -423,7 +423,7 @@ ext4_evfs_inode_map(struct file * filp, void __user * arg)
 		err = -ENOSYS;
 		goto clean_inode;
 	}
-	else if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
+	else if (!ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
 		/* TODO: Handle inodes that are not extent based as well */
 		ext4_msg(sb, KERN_ERR, "evfs_inode_map: "
 			"inode %ld is not extent based. Currently not supported",
@@ -854,8 +854,9 @@ ext4_evfs_extent_free(struct super_block * sb, void __user * arg)
 }
 
 static long
-ext4_evfs_extent_alloc(struct super_block * sb, struct evfs_opentry * op)
+ext4_evfs_extent_alloc(struct file * filp, struct evfs_opentry * op)
 {
+	struct super_block * sb = filp->f_inode->i_sb;
 	struct evfs_extent extent;
 	struct ext4_allocation_context ac;
 	void __user * arg = op->data;
@@ -906,6 +907,13 @@ ext4_evfs_extent_alloc(struct super_block * sb, struct evfs_opentry * op)
 
 	if (ac.ac_status != AC_STATUS_FOUND) {
 		ext4_msg(sb, KERN_ERR, "Failed to find space");
+		goto out;
+	}
+
+	err = evfs_add_my_extent(filp, &extent);
+	if (err < 0) {
+		ext4_msg(sb, KERN_ERR, "Failed to add EVFS extent struct");
+		ext4_discard_allocated_blocks(&ac);
 		goto out;
 	}
 
@@ -1050,10 +1058,18 @@ ext4_evfs_inode_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	if (IS_ERR(inode))
 		return -ENOENT;
 
-	if (lkb->exclusive)
+	/* NOTE: Write lock if exclusive, read lock otherwise */
+	if (lkb->exclusive) {
 		inode_lock(inode);
-	else
+		down_write(&EXT4_I(inode)->i_data_sem);
+		down_write(&EXT4_I(inode)->i_mmap_sem);
+		printk("EXCLUSIVE LOCK\n");
+	} else {
 		inode_lock_shared(inode);
+		down_read(&EXT4_I(inode)->i_data_sem);
+		down_read(&EXT4_I(inode)->i_mmap_sem);
+		printk("NONEXCLUSIVE LOCK\n");
+	}
 
 	iput(inode);
 	return 0;
@@ -1072,7 +1088,9 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 
 	if (!addr) {
 		for (group = 0; group < ext4_get_groups_count(sb); group++) {
+			ext4_mb_load_buddy(sb, group, &e4b);
 			grp = ext4_get_group_info(sb, group);
+			ext4_mb_unload_buddy(&e4b);
 			if (len <= grp->bb_free) {
 				lkb->object_id = group * EXT4_BLOCKS_PER_GROUP(sb)
 					+ grp->bb_first_free;
@@ -1085,6 +1103,11 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	}
 
 	grp = ext4_get_group_info(sb, group);
+
+	/* Ensure that the group is loaded first */
+	ext4_mb_load_buddy(sb, group, &e4b);
+	ext4_mb_unload_buddy(&e4b);
+
 	/*
 	 * TODO: Make this flexible later
 	 */
@@ -1093,10 +1116,6 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	}
 
 lock:
-	/* Ensure that the group is loaded first */
-	ext4_mb_load_buddy(sb, group, &e4b);
-	ext4_mb_unload_buddy(&e4b);
-
 	ext4_lock_group(sb, group);
 
 	return 0;
@@ -1139,10 +1158,15 @@ ext4_evfs_inode_unlock(struct super_block * sb, struct evfs_lockable * lkb)
 		return;
 	}
 
-	if (lkb->exclusive)
+	if (lkb->exclusive) {
 		inode_unlock(inode);
-	else
+		up_write(&EXT4_I(inode)->i_data_sem);
+		up_write(&EXT4_I(inode)->i_mmap_sem);
+	} else {
 		inode_unlock_shared(inode);
+		up_read(&EXT4_I(inode)->i_data_sem);
+		up_read(&EXT4_I(inode)->i_mmap_sem);
+	}
 
 	iput(inode);
 }
@@ -1171,8 +1195,18 @@ ext4_evfs_ino_group_unlock(struct super_block * sb, struct evfs_lockable * lkb)
 static long
 ext4_evfs_prepare(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 {
-    /* nothing needs to be pre-checked yet */
-    return 0;
+	long ret = 0;
+
+	switch(op->code) {
+	case EVFS_INODE_MAP:
+		ret = evfs_prepare_inode_map(aa->filp, op->data);
+		break;
+	/* TODO: Do check for extent alloc/free/write as well */
+	default:
+		ret = 0;
+	}
+
+	return ret;
 }
 
 static long
@@ -1255,7 +1289,7 @@ ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 	case EVFS_DIRENT_UPDATE:
 		break;
 	case EVFS_EXTENT_ALLOC:
-		err = ext4_evfs_extent_alloc(aa->sb, op);
+		err = ext4_evfs_extent_alloc(aa->filp, op);
 		break;
 	case EVFS_EXTENT_FREE:
 		err = ext4_evfs_extent_free(aa->sb, op->data);
