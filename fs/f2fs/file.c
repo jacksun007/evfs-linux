@@ -875,8 +875,11 @@ void unmap_block(struct inode *inode, pgoff_t pgofs)
 	raw_node = F2FS_NODE(dn.node_page);
 	addr = blkaddr_in_node(raw_node) + ofs;
 	blkaddr = le32_to_cpu(*addr);
-	if (blkaddr == NULL_ADDR)
+	if (blkaddr == NULL_ADDR) {
+	    printk("blkaddr is NULL! pgofs = %lu\n", pgofs);
+	    f2fs_put_dnode(&dn);    // TODO: test this
 		return;
+    }
 
 	dn.data_blkaddr = NULL_ADDR;
 	set_data_blkaddr(&dn);

@@ -5,10 +5,11 @@
 CC=gcc
 CFLAGS=-Wall -Wextra -Werror -ggdb -I./include
 PROG=libevfs.a
+OBJECT:=$(patsubst %.c,%.o,$(wildcard *.c))
 
 all: depend $(PROG)
 
-$(PROG): evfs.o atomic.o
+$(PROG): $(OBJECT) 
 	$(AR) rcs $@ $^
 
 .PHONY: clean

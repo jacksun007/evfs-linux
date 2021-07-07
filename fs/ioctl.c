@@ -172,12 +172,10 @@ static int fiemap_check_ranges(struct super_block *sb,
 	return 0;
 }
 
-static int ioctl_fiemap(struct file *filp, unsigned long arg)
+int __ioctl_fiemap(struct inode *inode, struct fiemap __user *ufiemap)
 {
 	struct fiemap fiemap;
-	struct fiemap __user *ufiemap = (struct fiemap __user *) arg;
 	struct fiemap_extent_info fieinfo = { 0, };
-	struct inode *inode = file_inode(filp);
 	struct super_block *sb = inode->i_sb;
 	u64 len;
 	int error;
@@ -214,7 +212,15 @@ static int ioctl_fiemap(struct file *filp, unsigned long arg)
 	if (copy_to_user(ufiemap, &fiemap, sizeof(fiemap)))
 		error = -EFAULT;
 
-	return error;
+	return error;    
+}
+
+static int ioctl_fiemap(struct file *filp, unsigned long arg)
+{
+	struct fiemap __user *ufiemap = (struct fiemap __user *) arg;
+	struct inode *inode = file_inode(filp);
+
+	return __ioctl_fiemap(inode, ufiemap);
 }
 
 static long ioctl_file_clone(struct file *dst_file, unsigned long srcfd,

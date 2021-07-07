@@ -56,6 +56,9 @@ struct evfs_atomic_action {
     struct evfs_atomic_action_param param;
 };
 
+/* fs/ioctl.c */
+extern int __ioctl_fiemap(struct inode *, struct fiemap __user *);
+
 /* fs/dcache.c */
 extern void d_drop_entry_in_dir(struct inode *, struct qstr *);
 

@@ -62,6 +62,7 @@ struct buffer_head *find_entry(struct inode *dir, const char *name,
 	return ext4_find_entry(dir, &name_qs, de, NULL);
 }
 
+#if 0
 static long
 dirent_remove(struct file *filep, struct super_block *sb,
 		unsigned long arg) {
@@ -187,6 +188,7 @@ dirent_add(struct file *filep, struct super_block *sb, unsigned long arg) {
 	iput(dir);
 	return 0;
 }
+#endif
 
 void
 ext4_evfs_copy_timeval(struct timespec *to, struct evfs_timeval *from)
@@ -569,6 +571,7 @@ out:
  * TODO: Currently no error when invalid request is received. Need to
  *       check and fix this.
  */
+#if 0 
 static long
 ext4_evfs_inode_unmap(struct file *filp, struct super_block *sb,
 		unsigned long arg)
@@ -619,6 +622,7 @@ ext4_evfs_inode_unmap(struct file *filp, struct super_block *sb,
 	iput(inode);
 	return err;
 }
+#endif
 
 static long
 ext4_evfs_inode_iter(struct super_block * sb, void __user * arg)

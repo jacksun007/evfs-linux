@@ -85,6 +85,7 @@ struct evfs_imentry {
     u64 len;
 };
 
+// TODO: move into evfsctl.h
 struct evfs_imap {
     u32 count;      // number of active entries
     u32 capacity;   // number of entries that fits (i.e. preallocated)

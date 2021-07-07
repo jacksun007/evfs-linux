@@ -768,7 +768,7 @@ f2fs_evfs_iunmap_entry(struct inode *inode, struct evfs_imentry * entry)
 	end = start + entry->len;
 	
 	for (addr = start; addr < end; addr++) {
-	    printk("unmapping la = %lu\n", addr);
+	    printk("unmapping la = %u\n", addr);
 		unmap_block(inode, addr);
 	}
 
@@ -780,7 +780,6 @@ long
 f2fs_evfs_inode_map(struct file * filp, void __user * arg)
 {
     struct super_block *sb = file_inode(filp)->i_sb;
-    struct f2fs_sb_info *sbi = F2FS_SB(sb);
     struct evfs_imap_op op;
     struct evfs_imap * imap;
     struct inode *inode;
@@ -832,6 +831,7 @@ f2fs_evfs_inode_map(struct file * filp, void __user * arg)
     for (i = 0; i < imap->count; i++) {
         struct evfs_extent extent;
         
+        (void)f2fs_evfs_imap_entry;
 #if 0
         ret = f2fs_evfs_imap_entry(inode, &imap->entry[i]);
         if (ret < 0)
@@ -1663,6 +1663,23 @@ long f2fs_evfs_free_inode(struct super_block *sb, u64 ino_nr)
     return -ENOSYS;
 }
 
+static long 
+f2fs_evfs_imap_info(struct file *filp, struct evfs_imap_param __user * uparam)
+{
+	struct evfs_imap_param param;
+	struct inode *inode = file_inode(filp), * request_inode;
+	struct super_block *sb = inode->i_sb;
+
+    if (copy_from_user(&param, uparam, sizeof(param)))
+		return -EFAULT;
+
+	request_inode = f2fs_iget(sb, param.ino_nr);
+	if (IS_ERR(request_inode))
+		return -ENOENT;
+
+    return __ioctl_fiemap(request_inode, param.fiemap);
+}
+
 struct evfs_op f2fs_evfs_ops = {
     .free_extent = f2fs_evfs_free_extent,
     .free_inode = f2fs_evfs_free_inode,
@@ -1679,6 +1696,8 @@ f2fs_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	    return evfs_run_atomic_action(filp, &f2fs_evfs_atomic_ops, (void *)arg);
 	case FS_IOC_EVFS_OPEN:
 	    return evfs_open(filp, &f2fs_evfs_ops);
+	case FS_IOC_IMAP_INFO:
+	    return f2fs_evfs_imap_info(filp, (void *)arg);
 	case FS_IOC_LIST_MY_EXTENTS:
 	    return evfs_list_my_extents(filp);
 	case FS_IOC_EXTENT_ITERATE:
