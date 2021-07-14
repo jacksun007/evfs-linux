@@ -51,32 +51,88 @@ void imap_free(evfs_t * evfs, struct evfs_imap * imap, int nofree)
     free(imap);
 }
 
+#define NUM_RETRIES 10
+
 // TODO: allow for ranges
 struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr)
 {
-    struct fiemap probe = {
-        .fm_start = 0,
-        .fm_length = ~0,        // basically end-of-file
-        .fm_flags = 0,
-        .fm_extent_count = 0,
-        .fm_mapped_extents = 0,
-    }, * fiemap;
-    struct evfs_imap_param param = { .ino_nr = ino_nr, .fiemap = &probe };
+    struct evfs_super_block sb;
+    struct evfs_imap * ret = NULL;
+    struct fiemap * fiemap;
+    struct evfs_imap_param param = { .ino_nr = ino_nr };
+    unsigned i, r;  // number of retries
     
-    if (ioctl(evfs->fd, FS_IOC_IMAP_INFO, &param) < 0) {
-		fprintf(stderr, "fiemap ioctl() failed\n");
-		return NULL;
-	}
+    if (super_info(evfs, &sb) < 0)
+        return 0; 
+    
+    fiemap = malloc(sizeof(struct fiemap));
+    if (fiemap == NULL)
+        return NULL;
+    
+    fiemap->fm_start = 0;
+    fiemap->fm_length = ~0;         // basically end-of-file
+    fiemap->fm_flags = 0;
+    fiemap->fm_extent_count = 0;
+    fiemap->fm_mapped_extents = 0;
+    param.fiemap = fiemap;
+    
+    for (r = 0; r < NUM_RETRIES; r++) 
+    {
+        unsigned size;
+    
+        if (ioctl(evfs->fd, FS_IOC_IMAP_INFO, &param) < 0) {
+		    fprintf(stderr, "fiemap ioctl() failed\n");
+		    goto fail;
+	    }
 	
-	printf("fm_mapped_extents = %u, fm_extent_count = %u\n", 
-	    probe.fm_mapped_extents, probe.fm_extent_count);
+	    printf("%d: fm_mapped_extents = %u, fm_extent_count = %u\n", 
+	           r, fiemap->fm_mapped_extents, fiemap->fm_extent_count);
 	
-	if (probe.fm_extent_count == 0) {
-	    return imap_alloc(0);
+	    if (fiemap->fm_extent_count >= fiemap->fm_mapped_extents) {
+	        ret = imap_alloc(fiemap->fm_mapped_extents);
+	        
+	        for (i = 0; i < fiemap->fm_mapped_extents; i++) {
+	            struct fiemap_extent * extent = &fiemap->fm_extents[i];
+	            struct evfs_imentry * entry = &ret->entry[i];
+  
+	            entry->inlined = extent->fe_flags & FIEMAP_EXTENT_NOT_ALIGNED;
+	            entry->index = i;
+	            
+	            if (!entry->inlined) {
+	                // just a sanity check to make sure all are block-aligned
+	                assert(extent->fe_logical % sb.block_size == 0);
+	                assert(extent->fe_physical % sb.block_size == 0);
+	                assert(extent->fe_length % sb.block_size == 0);
+	                
+	                entry->log_addr = extent->fe_logical / sb.block_size;
+	                entry->phy_addr = extent->fe_physical / sb.block_size;
+	                entry->len = extent->fe_length / sb.block_size;
+	            }
+	            else {
+	                /* TODO: this seems very ugly */
+	                entry->log_addr = extent->fe_logical;
+	                entry->phy_addr = extent->fe_physical;
+	                entry->len = extent->fe_length;
+	            }
+	        }
+	        
+	        ret->count = fiemap->fm_mapped_extents;
+            break;
+	    }
+	    
+	    size = fiemap->fm_mapped_extents;
+	    fiemap = realloc(fiemap, sizeof(struct fiemap) + 
+	                     sizeof(struct fiemap_extent) * size);
+            
+        if (fiemap == NULL)
+            return NULL;
+            
+        fiemap->fm_extent_count = size;
 	}
     
-    (void)fiemap;
-    return NULL;
+fail:
+    free(fiemap);
+    return ret;
 }
 
 int imap_append(struct evfs_imap * imap, u64 la, u64 pa, u64 len)
@@ -107,6 +163,7 @@ int imap_append(struct evfs_imap * imap, u64 la, u64 pa, u64 len)
     }
     
     imap->entry[imap->count].inlined = 0;
+    imap->entry[imap->count].index = imap->count;
     imap->entry[imap->count].log_addr = la;
     imap->entry[imap->count].phy_addr = pa;
     imap->entry[imap->count].len = len;

@@ -1,26 +1,17 @@
 #
 # Makefile
 #
-# 06/25/2021: Updated to use wildcard and pattern rules so we don't have to 
-#             add new entries every single time. Should not need to be changed
-#             ever again.
+# upper level Makefile for remaking library and then the test programs
+#
+# TODO: currently does not support making just one program (e.g., make iinfo)
 #
 
-CC := gcc
 EVFSDIR := ../evfs
 EVFSLIB := $(EVFSDIR)/libevfs.a
-LOADLIBES := -levfs
-CFLAGS := -Wall -Wextra -Werror -I$(EVFSDIR)/include -L../evfs -ggdb
 PROG := $(patsubst %.c,%,$(wildcard *.c))
 
-all: depend libevfs $(PROG)
-
-define PROG_RULE
-$(1): $(1).o $(EVFSLIB)
-	$(CC) $(CFLAGS) -o $(1) $(1).o $(LOADLIBES)
-endef 
-    
-$(foreach P,$(PROG),$(eval $(call PROG_RULE,$(P)))) 
+all: depend libevfs
+	$(MAKE) -f test.mk
     
 # always execute
 .PHONY: libevfs
@@ -34,6 +25,3 @@ clean:
 depend:
 	$(CC) -MM *.c > .depend
 
-ifeq (.depend,$(wildcard .depend))
-include .depend
-endif	

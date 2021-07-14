@@ -90,6 +90,7 @@ int main(int argc, char * argv[])
     u64 ino_nr;
     struct evfs_imap * imap;
     int ret = 0;
+    unsigned i;
     
     if (argc != 3) {
         goto error;
@@ -111,12 +112,23 @@ int main(int argc, char * argv[])
     
     if (imap == NULL) {
         fprintf(stderr, "error: cannot read mapping of inode %lu\n", ino_nr);
-        ret = 1;
-    }
-    else {
-        imap_free(evfs, imap, 1);
+        goto done;
     }
     
+    printf("file has %u extent(s):\n", imap->count);
+    for (i = 0; i < imap->count; i++) {
+        struct evfs_imentry * e = &imap->entry[i];
+        printf("%u: log: %lu, phy: %lu, len: %lu ", e->index, e->log_addr,
+            e->phy_addr, e->len);
+        
+        if (e->inlined)
+            printf("(inlined)");
+
+        printf("\n");
+    }
+    
+    imap_free(evfs, imap, 1);   
+done:
     evfs_close(evfs);
     return ret;
 error:

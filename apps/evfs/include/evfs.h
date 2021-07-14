@@ -23,6 +23,9 @@ typedef struct evfs_atomic evfs_t;
 struct evfs_iter_s;
 typedef struct evfs_iter_s evfs_iter_t;
 
+// userspace imap object
+struct evfs_imap;
+
 // basic open/close for evfs device
 evfs_t * evfs_open(const char * dev);
 void evfs_close(evfs_t * evfs);

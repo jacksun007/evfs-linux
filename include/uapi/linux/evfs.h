@@ -80,12 +80,12 @@ struct evfs_metadata {
 // mapping entry
 struct evfs_imentry {
     u32 inlined;    // this map entry is inlined (e.g., tail-packed)
+    u32 index;
     u64 log_addr;
     u64 phy_addr;
     u64 len;
 };
 
-// TODO: move into evfsctl.h
 struct evfs_imap {
     u32 count;      // number of active entries
     u32 capacity;   // number of entries that fits (i.e. preallocated)
