@@ -1618,13 +1618,13 @@ f2fs_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
         break;
     case EVFS_INODE_MAP:
         err = f2fs_evfs_inode_map(aa->filp, op->data);
-        break;          
+        break;
     case EVFS_EXTENT_ALLOC:
         err = f2fs_evfs_extent_alloc(aa->filp, op->data);
         break;
     case EVFS_EXTENT_WRITE:
         err = evfs_extent_write(aa->sb, op->data);
-        break;    
+        break;
     case EVFS_EXTENT_FREE:
         err = f2fs_evfs_extent_free(aa->filp, op->data);
         break;

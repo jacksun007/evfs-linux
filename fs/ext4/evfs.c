@@ -6,7 +6,7 @@
  * Kyo-Keun Park
  * Kuei Sun
  */
- 
+
 #include <linux/evfs.h>
 #include <linux/capability.h>
 #include <linux/time.h>
@@ -238,38 +238,6 @@ ext4_evfs_inode_free(struct super_block *sb, void __user * arg)
 }
 
 static long
-ext4_evfs_inode_read(struct super_block *sb, void __user * arg)
-{
-	struct evfs_inode_read_op read_op;
-	struct inode *inode;
-	struct iovec iov;
-	struct iov_iter iter;
-	int ret = 0;
-
-	if (copy_from_user(&read_op, (struct evfs_inode_read_op __user *) arg,
-				sizeof(struct evfs_inode_read_op)))
-		return -EFAULT;
-
-	inode = ext4_iget_normal(sb, read_op.ino_nr);
-	if (IS_ERR(inode)) {
-		ext4_msg(sb, KERN_ERR, "evfs_inode_read: failed to find inode");
-		return PTR_ERR(inode);
-	}
-
-	iov.iov_base = read_op.data;
-	iov.iov_len = read_op.length;
-	iov_iter_init(&iter, READ, &iov, 1, read_op.length);
-
-	ret = evfs_page_read_iter(inode, (loff_t *)&read_op.ofs, &iter, 0,
-				&find_get_page);
-	if (ret < 0)
-		return ret;
-
-	iput(inode);
-	return 0;
-}
-
-static long
 ext4_evfs_inode_info(struct super_block *sb, void __user * arg)
 {
 	struct inode *vfs_inode;
@@ -439,11 +407,12 @@ ext4_evfs_inode_map(struct file * filp, void __user * arg)
 	if (err < 0)
 		return err;
 
-	/* Unmap first before we map */
+	/*
+	 * Unmap first before we map.
+	 * Make sure to unmap *everything*, since FS bugs out if we
+	 * try to map to logical address that has already been mapped.
+	 */
 	for (i = 0; i < imap->count; i++) {
-		/* Skip non-unmapping extents */
-		if (imap->entry[i].phy_addr)
-			continue;
 		err = ext4_ext_unmap_space(inode, imap->entry[i].log_addr,
 				imap->entry[i].log_addr + imap->entry[i].len);
 		if (err < 0)
@@ -453,176 +422,29 @@ ext4_evfs_inode_map(struct file * filp, void __user * arg)
 	/* Map all entries now */
 	for (i = 0; i < imap->count; i++) {
 		struct evfs_extent extent;
+
+		/* Skip non-mapping extents */
+		if (!imap->entry[i].phy_addr)
+			continue;
+
+		err = ext4_evfs_imap_entry(inode, &imap->entry[i]);
+		if (err < 0)
+			goto sync_bdev;
+
 		evfs_imap_to_extent(&extent, &imap->entry[i]);
 		err = evfs_remove_my_extent(filp, &extent);
 		if (err < 0)
 			goto clean_imap;
 	}
 
+sync_bdev:
+	fsync_bdev(sb->s_bdev);
 clean_imap:
 	kfree(imap);
 clean_inode:
 	iput(inode);
 	return err;
 }
-
-#if 0
-static long
-ext4_evfs_inode_map(struct super_block *sb, void __user * arg)
-{
-	struct __evfs_imap evfs_i;
-	struct inode *inode;
-	struct extent_status es;
-	struct ext4_free_extent fex;
-	struct buffer_head *bitmap_bh = NULL;
-	struct ext4_map_blocks map;
-	handle_t *handle = NULL;
-	ext4_group_t group;
-	ext4_grpblk_t off_block;
-	int err = 0;
-
-	if (copy_from_user(&evfs_i, (struct __evfs_imap __user *) arg,
-				sizeof(struct __evfs_imap)))
-		return -EFAULT;
-
-	if (unlikely(evfs_i.length > INT_MAX)) {
-		ext4_error(sb, "Extent size too large");
-		return -EFSCORRUPTED;
-	}
-	if (unlikely(evfs_i.log_blkoff >= EXT_MAX_BLOCKS)) {
-		ext4_error(sb, "Logical block number is too large");
-		return -EFSCORRUPTED;
-	}
-
-	inode = ext4_iget_normal(sb, evfs_i.ino_nr);
-	if (IS_ERR(inode)) {
-		ext4_msg(sb, KERN_ERR, "iget failed during evfs");
-		return PTR_ERR(inode);
-	} else if (!S_ISREG(inode->i_mode)) {
-		ext4_msg(sb, KERN_ERR, "evfs_inode_map: "
-				"can only map extents to regular file");
-		iput(inode);
-		return -EINVAL;
-	}
-
-	ext4_get_group_no_and_offset(sb, evfs_i.phy_blkoff, &group, &off_block);
-
-	fex.fe_group = group;
-	fex.fe_start = off_block;
-	fex.fe_len = evfs_i.length;
-
-	bitmap_bh = ext4_read_block_bitmap(sb, group);
-	if (IS_ERR(bitmap_bh)) {
-		err = PTR_ERR(bitmap_bh);
-		bitmap_bh = NULL;
-		goto out;
-	}
-
-	err = ext4_journal_get_write_access(handle, bitmap_bh);
-	if (err)
-		goto out;
-
-	ext4_lock_group(sb, fex.fe_group);
-	if (!ext4_extent_check(fex, bitmap_bh, EVFS_ALL)) {
-		ext4_error(sb, "Given disk area is not allocated");
-		ext4_unlock_group(sb, fex.fe_group);
-		err = -EINVAL;
-		goto out;
-	}
-
-	if (ext4_es_lookup_extent(inode, evfs_i.log_blkoff, &es)) {
-		ext4_error(sb, "Logical block address is already mapped");
-		err = -EBUSY;
-		goto out;
-	}
-
-	/* TODO: This should be removed later on when EVFS handles inode locking separately */
-	down_write(&EXT4_I(inode)->i_data_sem);
-
-	map.m_flags = EXT4_GET_BLOCKS_CREATE;
-	map.m_lblk = evfs_i.log_blkoff;
-	map.m_pblk = evfs_i.phy_blkoff;
-	map.m_len = evfs_i.length;
-
-	if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
-		err = ext4_ext_map_blocks(handle, inode, &map, EXT4_GET_BLOCKS_EVFS_MAP);
-	} else {
-		// TODO:
-		ext4_msg(sb, KERN_ERR, "Inode %ld is NOT extent based!"
-			"EVFS operations currently not supported", inode->i_ino);
-		err = -EINVAL;
-	}
-
-	inode->i_blocks += evfs_i.length;
-	inode->i_size += evfs_i.length * PAGE_SIZE;
-
-	/* TODO: Similar to down_write, remove when inode lock is implemented */
-	up_write(&EXT4_I(inode)->i_data_sem);
-	ext4_unlock_group(sb, fex.fe_group);
-out:
-	brelse(bitmap_bh);
-	fsync_bdev(sb->s_bdev);
-	iput(inode);
-	return err;
-}
-#endif
-
-/*
- * TODO: Currently no error when invalid request is received. Need to
- *       check and fix this.
- */
-#if 0 
-static long
-ext4_evfs_inode_unmap(struct file *filp, struct super_block *sb,
-		unsigned long arg)
-{
-	struct __evfs_imap evfs_i;
-	struct inode *inode;
-	ext4_lblk_t start, end;
-	int err = 0;
-
-	if (copy_from_user(&evfs_i, (struct __evfs_imap __user *) arg,
-				sizeof(struct __evfs_imap)))
-		return -EFAULT;
-
-	start = evfs_i.log_blkoff;
-	end = start + evfs_i.length;
-
-	inode = ext4_iget_normal(sb, evfs_i.ino_nr);
-	if (IS_ERR(inode)) {
-		ext4_error(sb, "iget failed during evfs");
-		return PTR_ERR(inode);
-	} else if (!S_ISREG(inode->i_mode)) {
-		ext4_error(sb, "evfs_inode_map: "
-				   "can only map extents to regular file");
-		iput(inode);
-		return -EINVAL;
-	}
-
-	if (evfs_i.flag & EVFS_IMAP_UNMAP_ONLY) {
-		/* TODO: This should be removed later on when EVFS handles inode locking separately */
-		down_write(&EXT4_I(inode)->i_data_sem);
-
-		if (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
-			err = ext4_ext_unmap_space(inode, evfs_i.log_blkoff, evfs_i.log_blkoff + evfs_i.length);
-		} else {
-			// TODO:
-			ext4_msg(sb, KERN_ERR, "Inode %ld is NOT extent based!"
-				"EVFS operations currently not supported", inode->i_ino);
-			err = -EINVAL;
-		}
-
-		/* TODO: Similar to down_write, remove when inode lock is implemented */
-		up_write(&EXT4_I(inode)->i_data_sem);
-	} else {
-		err = ext4_punch_hole(inode, start * PAGE_SIZE, evfs_i.length * PAGE_SIZE);
-	}
-
-	fsync_bdev(sb->s_bdev);
-	iput(inode);
-	return err;
-}
-#endif
 
 static long
 ext4_evfs_inode_iter(struct super_block * sb, void __user * arg)
@@ -1056,6 +878,25 @@ ext4_evfs_sb_get(struct super_block * sb, void __user * arg)
 }
 
 static long
+ext4_evfs_imap_info(struct file *filp, struct evfs_imap_param __user *uparam)
+{
+	struct evfs_imap_param param;
+	struct inode *inode = file_inode(filp), * request_inode;
+	struct super_block *sb = inode->i_sb;
+
+	if (copy_from_user(&param, uparam, sizeof(param)))
+		return -EFAULT;
+
+	request_inode = ext4_iget_normal(sb, param.ino_nr);
+	if (IS_ERR(request_inode))
+		return -ENOENT;
+
+	return __ioctl_fiemap(request_inode, param.fiemap);
+
+	return 0;
+}
+
+static long
 ext4_evfs_inode_lock(struct super_block * sb, struct evfs_lockable * lkb)
 {
 	struct inode * inode = ext4_iget_normal(sb, lkb->object_id);
@@ -1098,8 +939,6 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 			if (len <= grp->bb_free) {
 				lkb->object_id = group * EXT4_BLOCKS_PER_GROUP(sb)
 					+ grp->bb_first_free;
-				printk("extent group lock object id = %lu\n", lkb->object_id);
-				printk("bb_first_free = %lu\n", grp->bb_first_free);
 				goto lock;
 			}
 		}
@@ -1348,6 +1187,8 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return evfs_run_atomic_action(filp, &ext4_evfs_atomic_ops, (void *)arg);
 	case FS_IOC_EVFS_OPEN:
 		return evfs_open(filp, &ext4_evfs_ops);
+	case FS_IOC_IMAP_INFO:
+		return ext4_evfs_imap_info(filp, (void *) arg);
 	case FS_IOC_INODE_ITERATE:
 		return ext4_evfs_inode_iter(sb, (void *) arg);
 	case FS_IOC_EXTENT_ITERATE:

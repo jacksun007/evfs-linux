@@ -480,6 +480,7 @@ again:
 		balance_dirty_pages_ratelimited(mapping);
 	} while (iov_iter_count(i));
 
+	filemap_write_and_wait(mapping);
 	fsync_bdev(sb->s_bdev);
 
 	return written ? written : status;
@@ -536,9 +537,9 @@ evfs_copy_param(struct evfs_iter_ops *iter, const void *param, int size)
 
 //
 // evfs atomic action implementation
-// 
+//
 
-void 
+void
 evfs_destroy_atomic_action(struct evfs_atomic_action * aa)
 {
     if (aa) {
@@ -551,10 +552,10 @@ evfs_destroy_atomic_action(struct evfs_atomic_action * aa)
 #define _IS_EVFS_OP(v, t) \
     ((v) >= EVFS_ ## t ## _OP_BEGIN && (v) < EVFS_ ## t ## _OP_END)
 #define IS_EVFS_READ_OP(v) _IS_EVFS_OP(v, READ)
-#define IS_EVFS_COMP_OP(v) _IS_EVFS_OP(v, COMP)   
-#define IS_EVFS_WRITE_OP(v) _IS_EVFS_OP(v, WRITE) 
+#define IS_EVFS_COMP_OP(v) _IS_EVFS_OP(v, COMP)
+#define IS_EVFS_WRITE_OP(v) _IS_EVFS_OP(v, WRITE)
 
-static 
+static
 long
 evfs_new_atomic_action(struct evfs_atomic_action ** aap, void * arg)
 {
@@ -563,42 +564,42 @@ evfs_new_atomic_action(struct evfs_atomic_action ** aap, void * arg)
     unsigned long ret;
     long err;
     int i, r, c;
-        
+
     /* copy the header */
     ret = copy_from_user(&param, (struct evfs_atomic_action_param __user *)arg,
                          sizeof(struct evfs_atomic_action_param));
     if (ret != 0) {
         return -EFAULT;
     }
-    
+
     /* allocate entire structure */
-    aa = kmalloc(sizeof(struct evfs_atomic_action) + 
+    aa = kmalloc(sizeof(struct evfs_atomic_action) +
                  param.count*sizeof(struct evfs_opentry), GFP_KERNEL | GFP_NOFS);
     if (!aa) {
         return -ENOMEM;
     }
-    
+
     /* copy the flexible array */
     aa->param = param;
-    ret = copy_from_user((char *)&aa->param + sizeof(param), 
+    ret = copy_from_user((char *)&aa->param + sizeof(param),
                          (char *)arg + sizeof(param),
                          param.count*sizeof(struct evfs_opentry));
     if (ret != 0) {
         err = -EFAULT;
         goto fail;
     }
-    
+
     /* initialize rest of struct */
     aa->nr_read = 0;
     aa->nr_comp = 0;
     aa->write_op = NULL;
     aa->read_set = NULL;
     aa->comp_set = NULL;
-    
+
     /* these are set outside of this function */
     aa->sb = NULL;
     aa->fsop = NULL;
-    
+
     /* count number of comp/read ops */
     for (i = 0; i < param.count; i++) {
         struct evfs_opentry * entry = &aa->param.item[i];
@@ -612,29 +613,29 @@ evfs_new_atomic_action(struct evfs_atomic_action ** aap, void * arg)
         }
         else {
             BUG_ON(!IS_EVFS_WRITE_OP(entry->code));
-            
+
             if (aa->write_op != NULL) {
                 err = -EINVAL;
                 goto fail;
             }
-            
+
             aa->write_op = entry;
             printk("evfs: adding %d to write set\n", entry->code);
         }
     }
-    
+
     /* allocate for read and comp set */
     if (aa->nr_read > 0) {
-        aa->read_set = kmalloc(sizeof(struct evfs_opentry *)*aa->nr_read, 
+        aa->read_set = kmalloc(sizeof(struct evfs_opentry *)*aa->nr_read,
                                GFP_KERNEL | GFP_NOFS);
         if (!aa->read_set) {
             ret = -ENOMEM;
             goto fail;
         }
     }
-    
-    if (aa->nr_comp > 0) {   
-        aa->comp_set = kmalloc(sizeof(struct evfs_opentry *)*aa->nr_comp, 
+
+    if (aa->nr_comp > 0) {
+        aa->comp_set = kmalloc(sizeof(struct evfs_opentry *)*aa->nr_comp,
                                GFP_KERNEL | GFP_NOFS);
         if (!aa->comp_set) {
             kfree(aa->read_set);
@@ -642,7 +643,7 @@ evfs_new_atomic_action(struct evfs_atomic_action ** aap, void * arg)
             goto fail;
         }
     }
-    
+
     /* set up read and comp set */
     for (i = 0, r = 0, c = 0; i < param.count; i++) {
         struct evfs_opentry * entry = &aa->param.item[i];
@@ -653,7 +654,7 @@ evfs_new_atomic_action(struct evfs_atomic_action ** aap, void * arg)
             aa->comp_set[c++] = entry;
         }
     }
-    
+
     aa->param.errop = 0;
     *aap = aa;
     return 0;
@@ -670,38 +671,38 @@ fail:
 
 static
 struct evfs_lockable *
-evfs_add_lockable(struct evfs_lockable * lk, int type, unsigned long id, 
+evfs_add_lockable(struct evfs_lockable * lk, int type, unsigned long id,
                   int ex, unsigned long data)
 {
     struct evfs_lockable * lkb = lk;
 
     while (lkb->type != EVFS_TYPE_INVALID) {
-        
+
         /* we found a duplicate entry */
         if (lkb->type == type && lkb->object_id == id) {
-            
+
             /* if not already exclusive, set it to exclusive */
             if (ex) {
                 lkb->exclusive = 1;
             }
-            
+
             if (lkb->data != data) {
                 printk("evfs warning: duplicate object id with different "
                        " data in lock set\n");
             }
-        
+
             return lkb;
         }
-    
+
         lkb++;
     }
-    
+
     /* cannot find duplicate entry, add it to the end */
     lkb->type = type;
     lkb->object_id = id;
     lkb->exclusive = ex;
     lkb->data = data;
-    
+
     /* invalidate last entry */
     INVALIDATE_LOCKABLE(lkb + 1);
     return lkb;
@@ -712,12 +713,12 @@ long
 evfs_add_inode_lockable(struct evfs_lockable * lk, int ex, void * arg)
 {
     unsigned long ino_nr;
-    long ret = copy_from_user(&ino_nr, (unsigned long __user *)arg, 
+    long ret = copy_from_user(&ino_nr, (unsigned long __user *)arg,
                          sizeof(unsigned long));
     if (ret != 0) {
         return -EFAULT;
     }
-    
+
     evfs_add_lockable(lk, EVFS_TYPE_INODE, ino_nr, ex, 0);
     return 0;
 }
@@ -729,7 +730,7 @@ __evfs_add_extent_lockable(struct evfs_lockable * lk, int t, int ex, void * arg)
     struct evfs_extent extent;
     struct evfs_lockable *lkb;
 
-    long ret = copy_from_user(&extent, (struct evfs_extent __user *)arg, 
+    long ret = copy_from_user(&extent, (struct evfs_extent __user *)arg,
                          sizeof(struct evfs_extent));
     if (ret != 0) {
 	return ERR_PTR(-EFAULT);
@@ -760,25 +761,25 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
     int max_lockable = aa->nr_read + 2;
     int i;
     long ret = 0;
-    
+
     struct evfs_lockable * lockable = kmalloc(
         max_lockable * sizeof(struct evfs_lockable), GFP_KERNEL | GFP_NOFS);
-    
+
     if (!lockable) {
         return -ENOMEM;
     }
-    
+
     /* last entry of the array is always invalid */
     INVALIDATE_LOCKABLE(&lockable[0]);
 
     for (i = 0; i < aa->param.count; i++) {
         struct evfs_opentry * entry = &aa->param.item[i];
 	struct evfs_lockable * curr_lk;
-        
+
         if (IS_EVFS_COMP_OP(entry->code)) {
             continue;
         }
-        
+
         /* pre-check correctness of argument */
         ret = aa->fsop->prepare(aa, entry);
         if (ret < 0) {
@@ -786,11 +787,11 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
             aa->param.errop = entry->id;
             goto fail;
         }
-        
+
         ret = 0;
         switch (entry->code) {
             case EVFS_INODE_INFO:
-            case EVFS_INODE_READ: 
+            case EVFS_INODE_READ:
             case EVFS_INODE_ACTIVE:
                 ret = evfs_add_inode_lockable(lockable, 0, entry->data);
                 break;
@@ -800,10 +801,10 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
             case EVFS_EXTENT_ACTIVE:
                 /* TODO: do not need to lock here */
                 break;
-            case EVFS_EXTENT_READ:     
+            case EVFS_EXTENT_READ:
             case EVFS_EXTENT_WRITE:
                 /* may need to lock evfs_my_extent for multithreaded app */
-                break;  
+                break;
             case EVFS_INODE_UPDATE:
             case EVFS_INODE_WRITE:
             case EVFS_INODE_MAP:
@@ -812,7 +813,7 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
                 break;
             case EVFS_SUPER_UPDATE:
                 evfs_add_lockable(lockable, EVFS_TYPE_SUPER, 0, 0, 0);
-                break;          
+                break;
             case EVFS_EXTENT_ALLOC:
                 curr_lk = evfs_add_extent_group_lockable(lockable, 1, entry->data);
 		if (IS_ERR(curr_lk)) {
@@ -830,7 +831,7 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
 			entry->lkb = curr_lk;
 			ret = 0;
 		}
-                break;    
+                break;
             case EVFS_INODE_ALLOC:
             case EVFS_DIRENT_ADD:
             case EVFS_DIRENT_INFO:
@@ -842,14 +843,14 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
             default:
                 ret = -EINVAL;
         }
-               
+
         if (ret < 0) {
             printk("evfs: operation %d failed during lock add.\n", entry->id);
             aa->param.errop = entry->id;
             goto fail;
         }
     }
-    
+
     *lp = lockable;
     return 0;
 fail:
@@ -899,7 +900,7 @@ evfs_get_field_value(struct evfs_opentry * entry, int field, u64 * lhsp)
         // all other evfs operations cannot be used for comparison
         return -EINVAL;
     }
-    
+
     return 0;
 }
 
@@ -914,15 +915,15 @@ evfs_const_compare(struct evfs_atomic_action * aa, void __user * arg)
 
     if (copy_from_user(&comp, arg, sizeof(struct evfs_const_comp)) != 0)
         return -EFAULT;
-        
+
     if (comp.id <= 0 || comp.id > aa->param.count)
         return -EINVAL;
-        
-    entry = &aa->param.item[comp.id - 1];    
+
+    entry = &aa->param.item[comp.id - 1];
     ret = evfs_get_field_value(entry, comp.field, &lhs);
     if (ret < 0)
         return ret;
-        
+
     return (lhs == comp.rhs) ? 1 : 0;
 }
 
@@ -948,7 +949,7 @@ evfs_execute_compare(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 }
 
 long
-evfs_run_atomic_action(struct file * filp, 
+evfs_run_atomic_action(struct file * filp,
                        struct evfs_atomic_op *fop,
                        void * arg)
 {
@@ -957,29 +958,29 @@ evfs_run_atomic_action(struct file * filp,
     struct evfs_lockable * lk, * lkb;
     long ret;
     unsigned i, j, k;
-    
+
     /* set up atomic action */
     ret = evfs_new_atomic_action(&aa, arg);
     if (ret < 0) {
         return ret;
     }
-    
+
     aa->filp = filp;
     inode = file_inode(filp);
     aa->sb = inode->i_sb;
     aa->fsop = fop;
-    
-    //printk("atomic_action: %d read, %d comp, %d write\n", 
+
+    //printk("atomic_action: %d read, %d comp, %d write\n",
     //   aa->nr_read, aa->nr_comp, aa->write_op ? 1 : 0);
-    
+
     ret = evfs_new_lock_set(aa, &lk);
     if (ret < 0) {
         printk("evfs: error while creating lock set\n");
         goto fail;
     }
-    
+
     /* lock everything */
-    i = 0;    
+    i = 0;
     lkb = lk;
     while (lkb->type != EVFS_TYPE_INVALID) {
         ret = fop->lock(aa, lkb);
@@ -991,8 +992,8 @@ evfs_run_atomic_action(struct file * filp,
 	printk("lkb->object_id = %lu\n", lkb->object_id);
         i++; lkb++;
     }
-    
-    // run read set first 
+
+    // run read set first
     for (k = 0; k < aa->nr_read; k++) {
         ret = fop->execute(aa, aa->read_set[k]);
         aa->read_set[k]->result = ret;
@@ -1001,7 +1002,7 @@ evfs_run_atomic_action(struct file * filp,
             goto unlock;
         }
     }
-    
+
     for (k = 0; k < aa->nr_comp; k++) {
         ret = evfs_execute_compare(aa, aa->comp_set[k]);
         aa->comp_set[k]->result = ret;
@@ -1011,8 +1012,8 @@ evfs_run_atomic_action(struct file * filp,
             goto unlock;
         }
     }
-    
-    // run write op last 
+
+    // run write op last
     if (aa->write_op) {
         ret = fop->execute(aa, aa->write_op);
         aa->write_op->result = ret;
@@ -1021,10 +1022,10 @@ evfs_run_atomic_action(struct file * filp,
             goto unlock;
         }
     }
-    
+
     /* success */
     ret = 0;
-    
+
 unlock:
     /* have to be careful here because we may unlock due to failure.
        should only unlock as many as the ones successfully locked.   */
@@ -1032,14 +1033,14 @@ unlock:
     while (lkb->type != EVFS_TYPE_INVALID && j < i) {
         fop->unlock(aa, lkb);
         //printk("unlocked: type = %u, id = %lu, exclusive = %d\n",
-        //    lkb->type, lkb->object_id, lkb->exclusive); 
+        //    lkb->type, lkb->object_id, lkb->exclusive);
         j++; lkb++;
-    } 
-    
+    }
+
 fail:
     /* assume success otherwise we are screwed anyways */
-    copy_to_user((struct evfs_atomic_action_param __user *) arg, 
-                 &aa->param, sizeof(struct evfs_atomic_action_param) + 
+    copy_to_user((struct evfs_atomic_action_param __user *) arg,
+                 &aa->param, sizeof(struct evfs_atomic_action_param) +
                  aa->param.count*sizeof(struct evfs_opentry));
     evfs_destroy_atomic_action(aa);
     return ret;
@@ -1050,19 +1051,19 @@ long evfs_imap_from_user(struct evfs_imap ** imptr, void __user * arg)
     u32 count;
     int imap_bytes;
     struct evfs_imap * imap;
-    
+
     *imptr = NULL;
     if (copy_from_user(&count, arg, sizeof(u32)))
 		return -EFAULT;
-		
+
 	imap_bytes = sizeof(struct evfs_imap) + count*sizeof(struct evfs_imentry);
     imap = kmalloc(imap_bytes, GFP_KERNEL | GFP_NOFS);
 	if (!imap)
-	    return -ENOMEM;	
-		
+	    return -ENOMEM;
+
 	if (copy_from_user(imap, arg, imap_bytes))
 		return -EFAULT;
-		
+
 	*imptr = imap;
     return 0;
 }
@@ -1073,17 +1074,17 @@ long
 evfs_imap_validate_entry(struct file * filp, struct evfs_imentry * entry)
 {
     const struct evfs_extent * ext;
-    
+
     // this is an unmap request
     if (entry->phy_addr == 0)
         return 0;
-    
+
     ext = evfs_find_my_extent(filp, entry->phy_addr);
     if (!ext) {
         printk("evfs warning: cannot find extent %llu\n", entry->phy_addr);
         return -EINVAL;
     }
-    
+
     // theoretically we should not make this check but it gets really
     // ugly if we have to break up extents in the tracker
     if (ext->len != entry->len) {
@@ -1091,7 +1092,7 @@ evfs_imap_validate_entry(struct file * filp, struct evfs_imentry * entry)
             "got %llu\n", ext->len, entry->len);
         return -EINVAL;
     }
-    
+
     return 0;
 }
 
@@ -1103,22 +1104,22 @@ evfs_prepare_inode_map(struct file * filp, void __user * arg)
     struct evfs_imentry * last, * this;
     long ret;
     unsigned i;
-    
+
     if (copy_from_user(&op, arg, sizeof(struct evfs_imap_op)) != 0)
         return -EFAULT;
- 
+
     ret = evfs_imap_from_user(&imap, op.imap);
     if (ret < 0)
         return ret;
-  
+
     // validate entries
     last = &imap->entry[0];
     if ((ret = evfs_imap_validate_entry(filp, last)) < 0)
         goto fail;
-    
+
     for (i = 1; i < imap->count; i++) {
         u64 end;
-    
+
         this = &imap->entry[i];
         if ((ret = evfs_imap_validate_entry(filp, this)) < 0)
             goto fail;
@@ -1127,15 +1128,15 @@ evfs_prepare_inode_map(struct file * filp, void __user * arg)
         end = last->log_addr + last->len;
         if (end > this->log_addr) {
             printk("evfs warning: imap is either not sorted or has overlaps. "
-                "issue found at entry[%u] (la = %llu, pa = %llu, len = %llu)\n", 
+                "issue found at entry[%u] (la = %llu, pa = %llu, len = %llu)\n",
                 i, this->log_addr, this->phy_addr, this->len);
             ret = -EINVAL;
             goto fail;
         }
-        
+
         last = this;
     }
-    
+
     ret = 0;
 fail:
     kfree(imap);
@@ -1145,13 +1146,13 @@ fail:
 /*
  * evfs per-device extent/inode list
  *
- * keeps track of unmapped extents and unused inodes for clean-up 
+ * keeps track of unmapped extents and unused inodes for clean-up
  * upon close() or program termination.
  *
  * TODO: add locks to support multi-threaded evfs application
  *
  */
- 
+
 struct evfs_my_extent {
     struct rb_node node;
     struct evfs_extent extent;
@@ -1189,18 +1190,18 @@ long evfs_open(struct file * filp, struct evfs_op * fop)
     return 0;
 }
 
-static 
+static
 void
 evfs_free_my_extents(struct super_block * sb, struct evfs * evfs)
 {
     struct evfs_my_extent * myex = NULL;
     struct rb_root *root = &evfs->my_extents;
     struct rb_node * node;
-    
-    
+
+
     while ((node = rb_last(root)) != NULL) {
         myex = rb_entry(node, struct evfs_my_extent, node);
-        printk("evfs: removing addr = %llu, len = %llu\n", 
+        printk("evfs: removing addr = %llu, len = %llu\n",
 	           myex->extent.addr, myex->extent.len);
 	    evfs->op->free_extent(sb, &myex->extent);
         rb_erase(node, root);
@@ -1217,7 +1218,7 @@ int evfs_release(struct inode * inode, struct file * filp)
         evfs_free_my_extents(inode->i_sb, evfs);
         kfree(evfs);
     }
-    
+
     return 0;
 }
 
@@ -1229,7 +1230,7 @@ __evfs_find_my_extent(struct evfs * evfs, u64 addr)
     struct rb_root * root;
     struct rb_node * node;
     struct evfs_my_extent * myex = NULL;
-    
+
     root = &evfs->my_extents;
     node = root->rb_node;
 
@@ -1250,96 +1251,96 @@ __evfs_find_my_extent(struct evfs * evfs, u64 addr)
     return NULL;
 }
 
-const 
+const
 struct evfs_extent *
 evfs_find_my_extent(struct file * filp, u64 addr)
 {
     struct evfs_my_extent * ret;
     struct evfs * evfs = filp->f_evfs;
-    
+
     if (!evfs)
         return NULL;
-    
+
     ret = __evfs_find_my_extent(evfs, addr);
     if (!ret)
         return NULL;
-        
+
     return &ret->extent;
 }
 
-long 
+long
 evfs_remove_my_extent(struct file * filp, const struct evfs_extent * ext)
 {
     struct evfs_my_extent * ret;
     struct evfs * evfs = filp->f_evfs;
-    
+
     if (!evfs)
         return -EINVAL;
-    
+
     ret = __evfs_find_my_extent(evfs, ext->addr);
     if (!ret)
         return 0;
-    
+
     if (ret->extent.len != ext->len) {
         printk("evfs warning: length mismatch during remove_my_extent\n");
         return 0;
     }
-    
+
     rb_erase(&ret->node, &evfs->my_extents);
     kfree(ret);
-    return 1;    
+    return 1;
 }
 
-long 
+long
 __evfs_extent_in_range(struct evfs * evfs, const struct evfs_extent * ext)
 {
     struct rb_root * root;
     struct rb_node * node;
     struct evfs_my_extent * myex = NULL;
     unsigned long start, end, mystart, myend;
-    
+
     root = &evfs->my_extents;
     node = root->rb_node;
     start = ext->addr;
     end = ext->addr + ext->len;
-    
+
     while (node) {
         myex = rb_entry(node, struct evfs_my_extent, node);
         mystart = myex->extent.addr;
-        myend = myex->extent.addr + myex->extent.len;        
-  
-        if (start >= mystart) {         
+        myend = myex->extent.addr + myex->extent.len;
+
+        if (start >= mystart) {
             // ext is contained within myex
             if (myend >= end) {
-                printk("(%lu, %lu) in (%lu, %lu)? yes\n", 
+                printk("(%lu, %lu) in (%lu, %lu)? yes\n",
                        start, end, mystart, myend);
                 return 1;
             }
-        
+
             node = node->rb_right;
         }
         else {
             node = node->rb_left;
         }
-        
+
         printk("(%lu, %lu) in (%lu, %lu)? no\n", start, end, mystart, myend);
     }
 
     return 0;
 }
 
-long 
+long
 evfs_extent_in_range(struct file * filp, const struct evfs_extent * ext)
 {
     struct evfs * evfs = filp->f_evfs;
-    
+
     if (!evfs)
         return -EINVAL;
-    
+
     return __evfs_extent_in_range(evfs, ext);
 }
 
-long 
+long
 evfs_add_my_extent(struct file * filp, const struct evfs_extent * ext)
 {
     struct evfs * evfs = filp->f_evfs;
@@ -1349,7 +1350,7 @@ evfs_add_my_extent(struct file * filp, const struct evfs_extent * ext)
 
     if (!evfs)
         return -EINVAL;
-        
+
     root = &evfs->my_extents;
     new = &root->rb_node;
 
@@ -1370,7 +1371,7 @@ evfs_add_my_extent(struct file * filp, const struct evfs_extent * ext)
   	if (!myex) {
   	    return -ENOMEM;
   	}
-  	
+
   	/* Add new node and rebalance tree. */
   	myex->extent = *ext;
   	rb_link_node(&myex->node, parent, new);
@@ -1386,21 +1387,21 @@ long evfs_list_my_extents(struct file * filp)
     struct rb_node *node;
     struct evfs_my_extent * myex;
     int count = 0;
-    
+
     if (!evfs) {
         printk("evfs: not opened via evfs_open\n");
         return -EINVAL;
     }
-    
-    root = &evfs->my_extents;    
-    for (node = rb_first(root); node; node = rb_next(node)) 
+
+    root = &evfs->my_extents;
+    for (node = rb_first(root); node; node = rb_next(node))
     {
         myex = rb_entry(node, struct evfs_my_extent, node);
         count++;
-	    printk("%d: addr = %llu, len = %llu\n", 
+	    printk("%d: addr = %llu, len = %llu\n",
 	            count, myex->extent.addr, myex->extent.len);
 	}
-	
+
 	printk("%d extents are owned by this evfs device\n", count);
 	return 0;
 }
@@ -1409,7 +1410,7 @@ long evfs_list_my_extents(struct file * filp)
  * TODO: support tracking of inodes
  */
 
-long 
+long
 evfs_add_my_inode(struct file * filp, u64 ino_nr)
 {
     (void)filp;
@@ -1417,7 +1418,7 @@ evfs_add_my_inode(struct file * filp, u64 ino_nr)
     return -ENOSYS;
 }
 
-long 
+long
 evfs_remove_my_inode(struct file * filp, u64 ino_nr)
 {
     (void)filp;
