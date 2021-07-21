@@ -780,6 +780,7 @@ long
 f2fs_evfs_inode_map(struct file * filp, void __user * arg)
 {
     struct super_block *sb = file_inode(filp)->i_sb;
+    struct f2fs_sb_info *sbi = F2FS_SB(sb);
     struct evfs_imap_op op;
     struct evfs_imap * imap;
     struct inode *inode;
@@ -827,27 +828,28 @@ f2fs_evfs_inode_map(struct file * filp, void __user * arg)
     printk("evfs info: finished unmapping all entries\n");
     
     // map all entries now
-    // f2fs_balance_fs(sbi, true);
+    f2fs_balance_fs(sbi, true);
     for (i = 0; i < imap->count; i++) {
         struct evfs_extent extent;
         
-        (void)f2fs_evfs_imap_entry;
-#if 0
         ret = f2fs_evfs_imap_entry(inode, &imap->entry[i]);
-        if (ret < 0)
+        if (ret < 0) {
+            printk("evfs error: inode_map cannot map entry %u\n", i);
             goto sync_bdev;
-#endif
+        }
             
         // after successful map, we untrack the extent
         evfs_imap_to_extent(&extent, &imap->entry[i]);
         ret = evfs_remove_my_extent(filp, &extent);
-        if (ret < 0)
-            goto clean_imap;
+        if (ret < 0) {
+            printk("evfs error: inode_map cannot free entry %u\n", i);
+            goto sync_bdev;
+        }
     }
     
     ret = 0;
-//sync_bdev:    
-//    fsync_bdev(sb->s_bdev);   
+sync_bdev:    
+    fsync_bdev(sb->s_bdev);   
 clean_imap:    
     kfree(imap);
 clean_inode:
