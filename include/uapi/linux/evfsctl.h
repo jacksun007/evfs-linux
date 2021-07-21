@@ -207,6 +207,7 @@ struct evfs_ext_rw_op {
         char * __data;      // used by kernel (to avoid const warning)
     };
     u64 len;                // length of data
+    u64 flags;
 };
 
 // NOTE: must include <linux/fiemap.h>

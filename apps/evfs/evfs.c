@@ -173,15 +173,29 @@ int extent_free(evfs_t * evfs, u64 pa, u64 len, int flags)
     return extent_operation(evfs, EVFS_EXTENT_FREE, pa, len, flags);
 }
 
+static inline void 
+set_extent_op(struct evfs_ext_rw_op * args, 
+              u64 pa, u64 off, const char * buf, u64 len, u64 flags)
+{
+    args->addr = pa;
+    args->offset = off;
+    args->wdata = buf;
+    args->len = len;
+    args->flags = flags;
+}
+
 int extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len)
 {
     struct evfs_ext_rw_op args;
+    set_extent_op(&args, pa, off, buf, len, 0);
+    return evfs_operation(evfs, EVFS_EXTENT_WRITE, &args);
+}
 
-    args.addr = pa;
-    args.offset = off;
-    args.wdata = buf;
-    args.len = len;
-    
+int 
+extent_write_unsafe(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len)
+{
+    struct evfs_ext_rw_op args;
+    set_extent_op(&args, pa, off, buf, len, EVFS_FORCED);
     return evfs_operation(evfs, EVFS_EXTENT_WRITE, &args);
 }
 

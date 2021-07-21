@@ -46,6 +46,9 @@ int extent_free(evfs_t * evfs, u64 pa, u64 len, int flags);
 int extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
 int extent_read(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len);
 
+// allows overwriting ANY part of the device
+int extent_write_unsafe(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
+
 // super block
 int super_info(evfs_t * evfs, struct evfs_super_block * sb);
 
