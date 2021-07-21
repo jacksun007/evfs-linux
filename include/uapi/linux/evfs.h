@@ -79,11 +79,12 @@ struct evfs_metadata {
 
 // mapping entry
 struct evfs_imentry {
-    u32 inlined;    // this map entry is inlined (e.g., tail-packed)
-    u32 index;
     u64 log_addr;
     u64 phy_addr;
     u64 len;
+    u32 index;
+    unsigned inlined  : 1;  // this map entry is inlined (e.g., tail-packed)
+    unsigned assigned : 1;  // this map entry is assigned to an inode
 };
 
 struct evfs_imap {

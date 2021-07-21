@@ -1075,6 +1075,11 @@ evfs_imap_validate_entry(struct file * filp, struct evfs_imentry * entry)
 {
     const struct evfs_extent * ext;
 
+    if (entry->inlined) {
+        printk("evfs error: inlined mapping is not supported!\n");
+        return -EINVAL;
+    }
+
     // this is an unmap request
     if (entry->phy_addr == 0)
         return 0;

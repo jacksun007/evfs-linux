@@ -13,13 +13,13 @@ EVFSDIR := ../evfs
 EVFSLIB := $(EVFSDIR)/libevfs.a
 LOADLIBES := -levfs
 CFLAGS := -Wall -Wextra -Werror -I$(EVFSDIR)/include -L../evfs -ggdb
-PROG := $(patsubst %.c,%,$(wildcard *.c))
+PROG := $(filter-out common,$(patsubst %.c,%,$(wildcard *.c)))
 
 all: $(PROG)
 
 define PROG_RULE
-$(1): $(1).o $(EVFSLIB)
-	$(CC) $(CFLAGS) -o $(1) $(1).o $(LOADLIBES)
+$(1): $(1).o common.o $(EVFSLIB)
+	$(CC) $(CFLAGS) -o $(1) $(1).o common.o $(LOADLIBES)
 endef 
     
 $(foreach P,$(PROG),$(eval $(call PROG_RULE,$(P)))) 

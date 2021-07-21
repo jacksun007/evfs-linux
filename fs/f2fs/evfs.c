@@ -816,10 +816,6 @@ f2fs_evfs_inode_map(struct file * filp, void __user * arg)
  
     // unmap first before we map
     for (i = 0; i < imap->count; i++) {
-        // skip non-unmapping extents
-        if (imap->entry[i].phy_addr != 0)
-            continue;
-    
         ret = f2fs_evfs_iunmap_entry(inode, &imap->entry[i]);
         if (ret < 0)
             goto clean_imap;
@@ -845,6 +841,9 @@ f2fs_evfs_inode_map(struct file * filp, void __user * arg)
             printk("evfs error: inode_map cannot free entry %u\n", i);
             goto sync_bdev;
         }
+        
+        // TODO: write back to user space
+        imap->entry[i].assigned = 1;
     }
     
     ret = 0;

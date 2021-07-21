@@ -51,6 +51,34 @@ void imap_free(evfs_t * evfs, struct evfs_imap * imap, int nofree)
     free(imap);
 }
 
+static 
+void
+fiemap_to_imentry(const struct evfs_super_block * sb,
+                  const struct fiemap_extent * extent, 
+                  struct evfs_imentry * entry, unsigned i)
+{
+    entry->index = i;
+    entry->inlined = (extent->fe_flags & FIEMAP_EXTENT_NOT_ALIGNED) ? 1 : 0;
+    entry->assigned = 1;
+    
+    if (!entry->inlined) {
+        // just a sanity check to make sure all are block-aligned
+        assert(extent->fe_logical % sb->block_size == 0);
+        assert(extent->fe_physical % sb->block_size == 0);
+        assert(extent->fe_length % sb->block_size == 0);
+        
+        entry->log_addr = extent->fe_logical / sb->block_size;
+        entry->phy_addr = extent->fe_physical / sb->block_size;
+        entry->len = extent->fe_length / sb->block_size;
+    }
+    else {
+        /* TODO: this seems very ugly */
+        entry->log_addr = extent->fe_logical;
+        entry->phy_addr = extent->fe_physical;
+        entry->len = extent->fe_length;
+    }
+}
+
 #define NUM_RETRIES 10
 
 // TODO: allow for ranges
@@ -94,26 +122,7 @@ struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr)
 	        for (i = 0; i < fiemap->fm_mapped_extents; i++) {
 	            struct fiemap_extent * extent = &fiemap->fm_extents[i];
 	            struct evfs_imentry * entry = &ret->entry[i];
-  
-	            entry->inlined = extent->fe_flags & FIEMAP_EXTENT_NOT_ALIGNED;
-	            entry->index = i;
-	            
-	            if (!entry->inlined) {
-	                // just a sanity check to make sure all are block-aligned
-	                assert(extent->fe_logical % sb.block_size == 0);
-	                assert(extent->fe_physical % sb.block_size == 0);
-	                assert(extent->fe_length % sb.block_size == 0);
-	                
-	                entry->log_addr = extent->fe_logical / sb.block_size;
-	                entry->phy_addr = extent->fe_physical / sb.block_size;
-	                entry->len = extent->fe_length / sb.block_size;
-	            }
-	            else {
-	                /* TODO: this seems very ugly */
-	                entry->log_addr = extent->fe_logical;
-	                entry->phy_addr = extent->fe_physical;
-	                entry->len = extent->fe_length;
-	            }
+                fiemap_to_imentry(&sb, extent, entry, i);
 	        }
 	        
 	        ret->count = fiemap->fm_mapped_extents;
@@ -163,6 +172,7 @@ int imap_append(struct evfs_imap * imap, u64 la, u64 pa, u64 len)
     }
     
     imap->entry[imap->count].inlined = 0;
+    imap->entry[imap->count].assigned = 0;
     imap->entry[imap->count].index = imap->count;
     imap->entry[imap->count].log_addr = la;
     imap->entry[imap->count].phy_addr = pa;
