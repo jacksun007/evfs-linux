@@ -32,10 +32,17 @@ void evfs_close(evfs_t * evfs);
 
 // iterators
 evfs_iter_t * inode_iter(evfs_t * evfs, int flags);
-evfs_iter_t * extent_iter(evfs_t * evfs, int flags);    // free space
+evfs_iter_t * extent_iter(evfs_t * evfs, int flags);        // free space
+evfs_iter_t * extent_group_iter(evfs_t * evfs, int flags);  // block group
+
 u64 inode_next(evfs_iter_t * it);
 struct evfs_extent extent_next(evfs_iter_t * it);
+
+// all iterators can be ended using this
 void iter_end(evfs_iter_t * it);
+
+// consume iterator and return count
+int iter_count(evfs_iter_t * it);
 
 // Extent
 // Note: You may only free/write to extents that you allocated yourself,
@@ -65,7 +72,11 @@ int extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
 struct evfs_imap * imap_new(evfs_t * evfs);
 struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr);
 int imap_append(struct evfs_imap * imap, u64 la, u64 pa, u64 len);
-void imap_free(evfs_t * evfs, struct evfs_imap * imap, int nofree);
+void imap_free(struct evfs_imap * imap);
+
+// reverse mapping
+int reverse_map(evfs_t * evfs, u64 pa, struct evfs_rmap ** rmptr);
+void rmap_free(struct evfs_rmap * rmap);
 
 // atomic interface
 struct evfs_atomic * atomic_begin(evfs_t * evfs);

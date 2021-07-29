@@ -8,6 +8,7 @@
 #include <linux/fiemap.h>
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -34,17 +35,18 @@ struct evfs_imap * imap_new(evfs_t * evfs)
     return imap_alloc(default_capacity);
 }
 
-void imap_free(evfs_t * evfs, struct evfs_imap * imap, int nofree)
+void imap_free(struct evfs_imap * imap)
 {
     unsigned i;
     
-    if (imap != NULL && !nofree) {
-        // free all physical extents
+    if (imap != NULL) {
         for (i = 0; i < imap->count; i++) {
             struct evfs_imentry * entry = &imap->entry[i];
-            if (entry->phy_addr > 0) {
-                extent_free(evfs, entry->phy_addr, entry->len, 0);
-            }   
+            
+            // TODO: free all unassigned physical extents
+            if (!entry->assigned) {
+                //extent_free(evfs, entry->phy_addr, entry->len, 0);
+            } 
         }   
     }
     
@@ -108,13 +110,14 @@ struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr)
     {
         unsigned size;
     
+        // f2fs currently does not support fiemap on directory inodes
         if (ioctl(evfs->fd, FS_IOC_IMAP_INFO, &param) < 0) {
-		    fprintf(stderr, "fiemap ioctl() failed\n");
+		    // fprintf(stderr, "fiemap ioctl() failed: %s\n", strerror(errno));
 		    goto fail;
 	    }
 	
-	    printf("%d: fm_mapped_extents = %u, fm_extent_count = %u\n", 
-	           r, fiemap->fm_mapped_extents, fiemap->fm_extent_count);
+	    //printf("%d: fm_mapped_extents = %u, fm_extent_count = %u\n", 
+	    //       r, fiemap->fm_mapped_extents, fiemap->fm_extent_count);
 	
 	    if (fiemap->fm_extent_count >= fiemap->fm_mapped_extents) {
 	        ret = imap_alloc(fiemap->fm_mapped_extents);

@@ -1006,9 +1006,13 @@ evfs_run_atomic_action(struct file * filp,
     for (k = 0; k < aa->nr_comp; k++) {
         ret = evfs_execute_compare(aa, aa->comp_set[k]);
         aa->comp_set[k]->result = ret;
-        // compare functions return 0 when comparison fails
-        if (ret <= 0) {
+        if (ret < 0) {
             aa->param.errop = aa->comp_set[k]->id;
+            goto unlock;
+        }
+        // return index of compare item if comparison fails
+        else if (ret == 0) {
+            ret = aa->comp_set[k]->id;
             goto unlock;
         }
     }

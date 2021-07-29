@@ -26,7 +26,7 @@ print_imap_info(evfs_t * evfs, unsigned ino_nr)
 {
     struct evfs_imap * imap = imap_info(evfs, ino_nr);
     print_imap(imap);
-    imap_free(evfs, imap, 1);   
+    imap_free(imap);   
 }
 
 #define NEW_MSG "hello world"
@@ -113,7 +113,7 @@ int main(int argc, char * argv[])
     print_inode(&inode);
     ret = 0;
 done:
-    imap_free(evfs, imap, 1);
+    imap_free(imap);
     evfs_close(evfs);
     return ret;
 error:

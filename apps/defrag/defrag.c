@@ -5,10 +5,21 @@
  *
  */
 
+#include <sys/stat.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
 #include <evfs.h>
+
+// turn on for debugging
+#define ALWAYS_DEFRAG
+
+#define eprintf(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__)
+
+// return value of defragment function
+#define NOT_FRAGMENTED 1
+#define INODE_BUSY 2
+#define NOT_REGULAR 3
 
 static int 
 atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
@@ -16,24 +27,60 @@ atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
 
 int usage(char * prog)
 {
-    fprintf(stderr, "usage: %s DEV [NUM]\n", prog);
-    fprintf(stderr, "  DEV: device of the file system.\n");
-    fprintf(stderr, "  NUM: Inode number of file to defragment.\n");
-    fprintf(stderr, "       When not specified, defragment all files.\n");
+    eprintf("usage: %s DEV [NUM]\n", prog);
+    eprintf("  DEV: device of the file system.\n");
+    eprintf("  NUM: Inode number of file to defragment.\n");
+    eprintf("       When not specified, defragment all files.\n");
     return 1;
 }
 
 // 1 for yes, 0 for no
 int should_defragment(evfs_t * evfs, struct evfs_super_block * sb, long ino_nr)
 {
-    // for now, always defragment
-    (void)evfs;
+    struct evfs_imap * imap = imap_info(evfs, ino_nr);
+    int ret = 0;
+    u64 end = 0;
+    int num_out_of_order = 0;
+    unsigned i;
+    
+    if (!imap) {
+        eprintf("warning: imap_info failed on inode %ld\n", ino_nr);
+        return 0;
+    }
+    
+    // current algorithm just checks if there are any extents that are not
+    // in monotonically increasing order
+    for (i = 0; i < imap->count; i++) {
+        struct evfs_imentry * e = &imap->entry[i];
+        
+        // do not defrag any file with inlined data
+        if (e->inlined) {
+            ret = 0;
+            goto done;
+        }
+        
+        if (end > e->phy_addr)
+            num_out_of_order++;
+        
+        end = e->phy_addr + e->len;
+    }
+
+#ifdef ALWAYS_DEFRAG
+    ret = 1;
+#else    
+    if (num_out_of_order > 0)
+        ret = 1;
+#endif
+    
+    // TODO: may need to consult fields of super block in the future
     (void)sb;
-    (void)ino_nr;
-    return 1;
+done:
+    imap_free(imap);
+    return ret;
 }
 
 #define CEILING(x,y) (((x) + (y) - 1) / (y))
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
 int defragment(evfs_t * evfs, struct evfs_super_block * sb, long ino_nr)
 {
@@ -46,28 +93,30 @@ int defragment(evfs_t * evfs, struct evfs_super_block * sb, long ino_nr)
     u64 extent_size;
     u64 byte_size;
 
-    if (!should_defragment(evfs, sb, ino_nr)) {
-        return 0;
-    }
-    
     inode.ino_nr = ino_nr;
-    ret = inode_info(evfs, &inode);
-    
-    if (!ret) {
+    if ((ret = inode_info(evfs, &inode)) < 0)
         return ret;
+
+    // TODO: need this for now because f2fs does not support directory fiemap
+    if (!S_ISREG(inode.mode)) {
+        return NOT_REGULAR;
+    }
+
+    if (!should_defragment(evfs, sb, ino_nr)) {
+        return NOT_FRAGMENTED;
     }
           
     // calculate how many blocks need to be allocated
     imap = imap_new(evfs);
     nr_blocks = CEILING(inode.bytesize, sb->block_size);       
-    extent_size = (nr_blocks > sb->max_extent_size) ? sb->max_extent_size : nr_blocks;
+    extent_size = MIN(nr_blocks, sb->max_extent_size);
     byte_size = extent_size * sb->block_size;   
     
     // set up buffer for copying data to new extents   
     data = malloc(byte_size);
     if (!data) {
         ret = -ENOMEM;
-        goto fail;
+        goto done;
     }      
           
     // start allocating new contiguous extents. we have to deal with the
@@ -80,57 +129,71 @@ int defragment(evfs_t * evfs, struct evfs_super_block * sb, long ino_nr)
 
         ret = imap_append(imap, loff, poff, extent_size);
         if (ret < 0) {
-            goto fail;
+            goto done;
         }   
            
         ret = inode_read(evfs, ino_nr, loff * sb->block_size, data, byte_size);
         if (ret < 0) {
-            goto fail;
+            goto done;
         }
         
         ret = extent_write(evfs, poff, 0, data, byte_size);
         if (ret < 0) {
-            goto fail;            
+            goto done;     
         }
         
         // prepare for next iteration
         nr_blocks -= extent_size;
         loff += extent_size;
-        extent_size = (nr_blocks > sb->max_extent_size) ? sb->max_extent_size : nr_blocks;
+        extent_size = MIN(nr_blocks, sb->max_extent_size);
         byte_size = extent_size * sb->block_size; 
     }
     
     // atomic_execute returns positive value if atomic action is cancelled 
     // due to failed comparison
     ret = atomic_inode_map(evfs, ino_nr, imap, &inode.mtime);
-    if (ret != 0) {
-        goto fail;
-    }
-    
+    if (ret > 0)
+        ret = INODE_BUSY;
+
+done:    
     free(data);
-    imap_free(evfs, imap, 1 /* do not free extents on success */);
+    imap_free(imap);
     return 0;
-    
-fail:
-    free(data);
-    imap_free(evfs, imap, 0 /* free all extents upon error */);
-    return ret;
 }
 
 int defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
 {
     evfs_iter_t * it = inode_iter(evfs, 0);
-    int ret = 0;
+    int ret = 0, cnt = 0, nf = 0, ib = 0, total = 0;
     long ino_nr;
     
     while ((ino_nr = inode_next(it)) > 0) {
         ret = defragment(evfs, sb, ino_nr);
+        total++;
+        
         if (ret < 0) {
+            eprintf("error while defragmenting inode %ld\n", ino_nr);
+            break;
+        }
+        else if (ret == 0)
+            cnt++;
+        else if (ret == NOT_FRAGMENTED)
+            nf++;
+        else if (ret == INODE_BUSY)
+            ib++;
+        else if (ret == NOT_REGULAR)
+            total--;
+        else {
+            eprintf("error: unknown return value from defragment()\n");
+            ret = -EINVAL;
             break;
         }
     }
     
     iter_end(it);
+    printf("%d inode(s) scanned. %d defragmented, %d not fragmented, %d busy\n", 
+        total, cnt, nf, ib);
+    
     return ret;
 }
 
@@ -192,12 +255,12 @@ atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
         goto fail;
     }
     
-    ret = atomic_const_equal(aa, id, EVFS_INODE_MTIME_SEC, mtime->tv_sec);
+    ret = atomic_const_equal(aa, id, EVFS_INODE_MTIME_TV_SEC, mtime->tv_sec);
     if (ret < 0) {
         goto fail;
     }
     
-    ret = atomic_const_equal(aa, id, EVFS_INODE_MTIME_USEC, mtime->tv_usec);
+    ret = atomic_const_equal(aa, id, EVFS_INODE_MTIME_TV_USEC, mtime->tv_usec);
     if (ret < 0) {
         goto fail;
     }

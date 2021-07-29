@@ -18,8 +18,14 @@ typedef long i64;
 typedef int i32;
 
 struct evfs_extent {
-    u64 addr;   // block address
-    u64 len;    // number of blocks
+    u64 addr;       // block address
+    u64 len;        // number of blocks
+};
+
+struct evfs_extent_group {
+    u64 addr;       
+    u64 len;
+    u64 block_count;    // number of blocks used
 };
 
 struct evfs_super_block {
@@ -59,6 +65,20 @@ struct evfs_inode {
         const struct evfs_inode_property prop;  /* users read this */
         struct evfs_inode_property _prop;       /* kernel modify this */
     };
+};
+
+struct evfs_rmentry {
+    u64 ino_nr;     // if 0, does not belong to any inode
+    u64 log_addr;     // if type is data, refers to logical address
+};
+
+struct evfs_rmap {
+    u64 phy_addr;
+    u64 len;
+    u32 type;       // if 0, refers to data mapping
+    u16 count;
+    u16 capacity;
+    struct evfs_rmentry entry[];
 };
 
 struct evfs_metadata {
@@ -111,7 +131,8 @@ enum evfs_field {
 enum evfs_flag {
     EVFS_ANY = 1,
     EVFS_ALL = 2,
-    EVFS_FORCED = 3,
+    EVFS_NOT = 3,
+    EVFS_FORCED = 4,
 };
 
 #endif // UAPI_EVFS_H_

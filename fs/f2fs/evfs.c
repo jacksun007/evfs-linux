@@ -1627,14 +1627,18 @@ f2fs_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
     case EVFS_EXTENT_FREE:
         err = f2fs_evfs_extent_free(aa->filp, op->data);
         break;
+    case EVFS_INODE_READ:
+        err = evfs_inode_read(aa->sb, op->data, &find_get_page);
+		break; 
+    case EVFS_INODE_WRITE:
+        err = evfs_inode_write(aa->sb, op->data, &find_get_page);
+		break;
     case EVFS_SUPER_UPDATE:
     case EVFS_DIRENT_UPDATE:    
     case EVFS_DIRENT_INFO:
     case EVFS_INODE_ACTIVE:
     case EVFS_EXTENT_READ:
-    case EVFS_INODE_READ:       
-    case EVFS_INODE_ALLOC:
-    case EVFS_INODE_WRITE:
+    case EVFS_INODE_ALLOC:   
     case EVFS_DIRENT_ADD:
     case EVFS_DIRENT_REMOVE:
     case EVFS_DIRENT_RENAME:

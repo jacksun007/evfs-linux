@@ -14,9 +14,9 @@
 
 int usage(char * prog)
 {
-    fprintf(stderr, "usage: %s DEV NAME\n", prog);
+    fprintf(stderr, "usage: %s DEV NUM\n", prog);
     fprintf(stderr, "  DEV: device of the file system.\n");
-    fprintf(stderr, " NAME: name for new file on evfs device.\n");
+    fprintf(stderr, "  NUM: inode number.\n");
     return 1;
 }
 
@@ -31,9 +31,9 @@ int main(int argc, char * argv[])
         goto error;
     }
 
-    ret = create_data_file(argv[1], argv[2]);
-    if (ret < 0) {
-        printf("%s: cannot create %s\n", argv[0], argv[2]);
+    ret = atoi(argv[2]);
+    if (ret == 0) {
+        printf("%s: '%s' is an invalid inode number\n", argv[0], argv[2]);
         return 1;
     }
 
@@ -50,10 +50,9 @@ int main(int argc, char * argv[])
         goto done;
     }
     
-    // common.c 
-    print_imap(imap);
     
-    imap_free(evfs, imap, 1);   
+    print_imap(imap);   // common.c 
+    imap_free(imap);   
 done:
     evfs_close(evfs);
     return ret;
