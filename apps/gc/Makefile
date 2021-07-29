@@ -7,11 +7,11 @@ CFLAGS := -Wall -Wextra -Werror -I../evfs/include -ggdb -L../evfs
 LOADLIBES := -levfs
 EVFSDIR := ../evfs
 EVFSLIB := $(EVFSDIR)/libevfs.a
-PROG := defrag
+PROG := gc
 
 all: depend $(PROG)
 
-$(PROG): defrag.o $(EVFSLIB)
+$(PROG): gc.o $(EVFSLIB)
 	$(CC) $(CFLAGS) -o $@ $< $(LOADLIBES)
 
 $(EVFSLIB): | libevfs

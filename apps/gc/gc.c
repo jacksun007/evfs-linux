@@ -41,7 +41,7 @@ should_collect(evfs_t * evfs, const struct evfs_extent_group * group)
     }
     
     // collect if there are 2 or more holes
-    return (num_holes > 1) : 1 : 0;
+    return (num_holes > 1) ? 1 : 0;
 }
 
 static int
@@ -83,19 +83,17 @@ relocate_metadata(evfs_t * evfs, const struct evfs_extent_group * group,
                                  struct evfs_rmap * rmap)
 {
     struct evfs_inode inode;
-    struct evfs_rmentry * entry;
     int ret;
     u64 paddr;
     
     // TODO: this should always be true?
     assert(rmap->count == 1);   
-    entry = &rmap->entry[0];
-    
+
     paddr = extent_alloc(evfs, 0, rmap->len, EVFS_NOT | EVFS_METADATA, group);
     if (!paddr)
         return -ENOSPC;
         
-    ret = metadata_move(evfs, paddr, rmap, rmap->len);
+    ret = metadata_move(evfs, paddr, rmap);
     if (ret < 0)
         break;
 

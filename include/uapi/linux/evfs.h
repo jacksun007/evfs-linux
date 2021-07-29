@@ -133,6 +133,9 @@ enum evfs_flag {
     EVFS_ALL = 2,
     EVFS_NOT = 3,
     EVFS_FORCED = 4,
+    
+    EVFS_FREE_SPACE = 5,
+    EVFS_USED_SPACE = 6,
 };
 
 #endif // UAPI_EVFS_H_
