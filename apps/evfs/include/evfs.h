@@ -36,7 +36,7 @@ evfs_iter_t * extent_iter(evfs_t * evfs, int flags);        // free space
 evfs_iter_t * extent_group_iter(evfs_t * evfs, int flags);  // block group
 
 u64 inode_next(evfs_iter_t * it);
-struct evfs_extent * extent_next(evfs_iter_t * it);
+struct evfs_extent extent_next(evfs_iter_t * it);
 struct evfs_extent_group * extent_group_next(evfs_iter_t * it);
 
 // all iterators can be ended using this
