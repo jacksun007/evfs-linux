@@ -68,7 +68,7 @@ int main(int argc, char * argv[])
         printf("allocated physical extent %d\n", ret);
     }
 
-    pa = ret;
+    pa = (u64)ret;
     ret = extent_write(evfs, pa, 0, NEW_MSG, sizeof(NEW_MSG));
     if (ret < 0) {
         fprintf(stderr, "error: could not write to owned extent %lu, "

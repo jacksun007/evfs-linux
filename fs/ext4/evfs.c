@@ -17,6 +17,7 @@
 #include <linux/random.h>
 #include <linux/dcache.h>
 #include <linux/buffer_head.h>
+#include <linux/backing-dev.h>
 #include <asm/uaccess.h>
 #include "mballoc.h"
 #include "ext4_jbd2.h"
@@ -276,6 +277,7 @@ ext4_evfs_inode_set(struct super_block * sb, void __user * arg)
 	}
 
 	evfs_to_vfs_inode(&evfs_i, inode);
+	mark_inode_dirty(inode);
 	write_inode_now(inode, 1);
 	iput(inode);
 
@@ -357,7 +359,6 @@ ext4_evfs_imap_entry(struct inode * inode, struct evfs_imentry * entry)
 	err = ext4_ext_map_blocks(handle, inode, &map, EXT4_GET_BLOCKS_EVFS_MAP);
 	inode->i_blocks += entry->len;
 
-	fsync_bdev(inode->i_sb->s_bdev);
 	return err;
 }
 
@@ -413,8 +414,32 @@ ext4_evfs_inode_map(struct file * filp, void __user * arg)
 	 * try to map to logical address that has already been mapped.
 	 */
 	for (i = 0; i < imap->count; i++) {
-		err = ext4_ext_unmap_space(inode, imap->entry[i].log_addr,
-				imap->entry[i].log_addr + imap->entry[i].len);
+		ext4_lblk_t first_block, stop_block;
+		loff_t first_block_offset, stop_block_offset;
+		int err;
+
+		first_block = imap->entry[i].log_addr;
+		stop_block = imap->entry[i].log_addr + imap->entry[i].len;
+		first_block_offset = first_block << EXT4_BLOCK_SIZE_BITS(sb);
+		stop_block_offset = stop_block << EXT4_BLOCK_SIZE_BITS(sb);
+
+		/*
+		 * Need to clear old extent from both inode's extent_status, and
+		 * pagecache. Seems like that ext4_es_remove_extent can fail
+		 * due to race condition, so we will need ways to retry.
+		 */
+retry:
+		err = ext4_es_remove_extent(inode, first_block, stop_block - first_block);
+		if (err == -ENOMEM) {
+			cond_resched();
+			congestion_wait(BLK_RW_ASYNC, HZ/50);
+			goto retry;
+		}
+		if (err)
+			return err;
+
+		truncate_pagecache_range(inode, first_block_offset, stop_block_offset);
+		err = ext4_ext_unmap_space(inode, first_block, stop_block);
 		if (err < 0)
 			goto clean_imap;
 	}
@@ -906,14 +931,17 @@ ext4_evfs_inode_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	/* NOTE: Write lock if exclusive, read lock otherwise */
 	if (lkb->exclusive) {
 		inode_lock(inode);
-		down_write(&EXT4_I(inode)->i_data_sem);
+		/* NOTE (kyokeun): Locking i_data_sem and i_mmap_sem here
+		 *                 seems to trigger a deadlock warning. So
+		 *                 try locking it as they need it first and
+		 *                 see if that causes any future deadlock
+		 *                 for now. */
 		down_write(&EXT4_I(inode)->i_mmap_sem);
-		printk("EXCLUSIVE LOCK\n");
+		down_write(&EXT4_I(inode)->i_data_sem);
 	} else {
 		inode_lock_shared(inode);
-		down_read(&EXT4_I(inode)->i_data_sem);
 		down_read(&EXT4_I(inode)->i_mmap_sem);
-		printk("NONEXCLUSIVE LOCK\n");
+		down_read(&EXT4_I(inode)->i_data_sem);
 	}
 
 	iput(inode);
@@ -1003,12 +1031,12 @@ ext4_evfs_inode_unlock(struct super_block * sb, struct evfs_lockable * lkb)
 
 	if (lkb->exclusive) {
 		inode_unlock(inode);
-		up_write(&EXT4_I(inode)->i_data_sem);
 		up_write(&EXT4_I(inode)->i_mmap_sem);
+		up_write(&EXT4_I(inode)->i_data_sem);
 	} else {
 		inode_unlock_shared(inode);
-		up_read(&EXT4_I(inode)->i_data_sem);
 		up_read(&EXT4_I(inode)->i_mmap_sem);
+		up_read(&EXT4_I(inode)->i_data_sem);
 	}
 
 	iput(inode);
@@ -1042,7 +1070,7 @@ ext4_evfs_prepare(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 
 	switch(op->code) {
 	case EVFS_INODE_MAP:
-		ret = evfs_prepare_inode_map(aa->filp, op->data);
+		 ret = evfs_prepare_inode_map(aa->filp, op->data);
 		break;
 	/* TODO: Do check for extent alloc/free/write as well */
 	default:

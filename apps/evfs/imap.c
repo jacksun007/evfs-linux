@@ -181,7 +181,7 @@ int imap_append(struct evfs_imap * imap, u64 la, u64 pa, u64 len)
     imap->entry[imap->count].phy_addr = pa;
     imap->entry[imap->count].len = len;
     imap->count += 1;
-    
+
     return 0;
 }
 
