@@ -478,22 +478,22 @@ ext4_evfs_inode_iter(struct super_block * sb, void __user * arg)
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
 	struct inode *inode;
 	struct ext4_group_desc *gdp;
+	struct ext4_group_info *grp;
 	struct buffer_head *bh;
 	u64 param;
 	ext4_group_t group, max_group = sbi->s_groups_count;
 	unsigned long ino_offset;
-	int ino_nr = sbi->s_first_ino;
+	unsigned long ino_nr = sbi->s_first_ino;
 	int ret = 0;
-
-	iter.count = 0;
 
 	if (copy_from_user(&iter, (struct evfs_iter_ops __user *) arg,
 				sizeof(struct evfs_iter_ops)))
 		return -EFAULT;
 
-	if (iter.ino_nr > ino_nr)
-		ino_nr = iter.ino_nr;
+	if (iter.start_from > ino_nr)
+		ino_nr = iter.start_from;
 
+	iter.count = 0;
 	ino_offset = (ino_nr - 1) % EXT4_INODES_PER_GROUP(sb);
 	group = (ino_nr - 1) / EXT4_INODES_PER_GROUP(sb);
 
@@ -503,6 +503,12 @@ ext4_evfs_inode_iter(struct super_block * sb, void __user * arg)
 			ext4_msg(sb, KERN_ERR, "group %d invalid", group);
 			continue;
 		}
+		grp = ext4_get_group_info(sb, group);
+		if (unlikely(EXT4_MB_GRP_NEED_INIT(grp))) {
+			if (ext4_mb_init_group(sb, group, GFP_NOFS))
+				continue;
+		}
+
 		bh = sb_getblk(sb, ext4_inode_bitmap(sb, gdp));
 		lock_buffer(bh);
 		if (!buffer_uptodate(bh)) {
@@ -797,7 +803,9 @@ ext4_evfs_extent_iter(struct super_block * sb, void __user * arg)
 	if (copy_from_user(&iter, (struct evfs_iter_ops __user *) arg,
 				sizeof(struct evfs_iter_ops)))
 		return -EFAULT;
+
 	iter.count = 0;
+
 	if (iter.start_from < le32_to_cpu(sbi->s_es->s_first_data_block))
 		iter.start_from = le32_to_cpu(sbi->s_es->s_first_data_block);
 	ext4_get_group_no_and_offset(sb, iter.start_from, &group, &off_block);
@@ -815,11 +823,11 @@ ext4_evfs_extent_iter(struct super_block * sb, void __user * arg)
 			ext4_msg(sb, KERN_ERR, "group %d invalid", group);
 			continue;
 		}
-		bh = sb_getblk(sb, ext4_block_bitmap(sb, gdp));
 		if (unlikely(EXT4_MB_GRP_NEED_INIT(grp))) {
 			if (ext4_mb_init_group(sb, group, GFP_NOFS))
 				continue;
 		}
+		bh = sb_getblk(sb, ext4_block_bitmap(sb, gdp));
 		ext4_lock_group(sb, group);
 		lock_buffer(bh);
 		if (!buffer_uptodate(bh)) {
@@ -961,6 +969,7 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 
 	if (!addr) {
 		for (group = 0; group < ext4_get_groups_count(sb); group++) {
+			/* Ensure that the group is loaded first */
 			ext4_mb_load_buddy(sb, group, &e4b);
 			grp = ext4_get_group_info(sb, group);
 			ext4_mb_unload_buddy(&e4b);

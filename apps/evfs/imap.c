@@ -62,7 +62,7 @@ fiemap_to_imentry(const struct evfs_super_block * sb,
     entry->index = i;
     entry->inlined = (extent->fe_flags & FIEMAP_EXTENT_NOT_ALIGNED) ? 1 : 0;
     entry->assigned = 1;
-    
+
     if (!entry->inlined) {
         // just a sanity check to make sure all are block-aligned
         assert(extent->fe_logical % sb->block_size == 0);
@@ -116,7 +116,7 @@ struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr)
 		    goto fail;
 	    }
 	
-	    //printf("%d: fm_mapped_extents = %u, fm_extent_count = %u\n", 
+	    //printf("%d: fm_mapped_extents = %u, fm_extent_count = %u\n",
 	    //       r, fiemap->fm_mapped_extents, fiemap->fm_extent_count);
 	
 	    if (fiemap->fm_extent_count >= fiemap->fm_mapped_extents) {

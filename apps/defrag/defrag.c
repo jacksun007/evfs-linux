@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
+#include <string.h>
 #include <evfs.h>
 
 // turn on for debugging
@@ -35,7 +36,7 @@ int usage(char * prog)
 }
 
 // 1 for yes, 0 for no
-int should_defragment(evfs_t * evfs, struct evfs_super_block * sb, long ino_nr)
+int should_defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr)
 {
     struct evfs_imap * imap = imap_info(evfs, ino_nr);
     int ret = 0;
@@ -44,7 +45,7 @@ int should_defragment(evfs_t * evfs, struct evfs_super_block * sb, long ino_nr)
     unsigned i;
     
     if (!imap) {
-        eprintf("warning: imap_info failed on inode %ld\n", ino_nr);
+        eprintf("warning: imap_info failed on inode %lu\n", ino_nr);
         return 0;
     }
     
@@ -82,7 +83,7 @@ done:
 #define CEILING(x,y) (((x) + (y) - 1) / (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
-int defragment(evfs_t * evfs, struct evfs_super_block * sb, long ino_nr)
+int defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr)
 {
     struct evfs_inode inode;
     char * data = NULL;
@@ -92,6 +93,8 @@ int defragment(evfs_t * evfs, struct evfs_super_block * sb, long ino_nr)
     struct evfs_imap * imap = NULL;
     u64 extent_size;
     u64 byte_size;
+
+    printf("defragmenting inode %lu\n", ino_nr);
 
     inode.ino_nr = ino_nr;
     if ((ret = inode_info(evfs, &inode)) < 0)
@@ -165,12 +168,12 @@ int defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
 {
     evfs_iter_t * it = inode_iter(evfs, 0);
     int ret = 0, cnt = 0, nf = 0, ib = 0, total = 0;
-    long ino_nr;
+    unsigned long ino_nr;
     
     while ((ino_nr = inode_next(it)) > 0) {
         ret = defragment(evfs, sb, ino_nr);
         total++;
-        
+
         if (ret < 0) {
             eprintf("error while defragmenting inode %ld\n", ino_nr);
             break;
@@ -216,7 +219,8 @@ int main(int argc, char * argv[])
     }
     
     if ((ret = super_info(evfs, &sb)) < 0) {
-        fprintf(stderr, "Error: could not retrieve super block info.\n");
+        fprintf(stderr, "Error: could not retrieve super block info: %s\n",
+		strerror(-ret));
         goto done;
     }
 
