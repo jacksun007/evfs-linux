@@ -948,6 +948,7 @@ f2fs_evfs_inode_iter(struct file *filp, struct super_block *sb, unsigned long ar
 				sizeof(struct evfs_iter_ops)))
 		return -EFAULT;
 
+	iter.count = 0;
 	nid = iter.start_from;
 
 	for (; nid < end_nid; nid++) {
