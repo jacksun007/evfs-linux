@@ -1297,15 +1297,16 @@ f2fs_evfs_extent_alloc(struct file * filp, void __user * arg)
 {
 	struct super_block *sb = file_inode(filp)->i_sb;
 	struct f2fs_sb_info *sbi = F2FS_SB(sb);
-	struct evfs_extent_op ext_op;
+	struct evfs_extent_alloc_op ext_op;
     struct evfs_extent * extent;
     struct curseg_info *curseg;
     unsigned long blkaddr, end;
 	long ret = 0;
 
-    // TODO (jsun): currently ignoring flag field
-    if (copy_from_user(&ext_op, arg, sizeof(struct evfs_extent_op)))
+    if (copy_from_user(&ext_op, arg, sizeof(struct evfs_extent_alloc_op)))
 		return -EFAULT;
+
+    // TODO (jsun): currently ignoring attr field
 
     extent = &ext_op.extent;
     curseg = CURSEG_I(sbi, CURSEG_WARM_DATA);

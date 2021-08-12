@@ -722,6 +722,7 @@ ext4_evfs_extent_alloc(struct file * filp, struct evfs_opentry * op)
 	ext4_grpblk_t off_block;
 	int err = 0;
 
+    // TODO (jsun): currently only copying extent field of evfs_extent_alloc_op
 	if (copy_from_user(&extent, (struct evfs_extent __user *) arg,
 				sizeof(extent)))
 		return -EFAULT;

@@ -44,7 +44,7 @@ int main(int argc, char * argv[])
     srand(time(NULL));
     
     for (i = 0; i < NUM_EXTENTS; i++) {
-        ret = extent_alloc(evfs, 0, len, 0);
+        ret = extent_alloc(evfs, 0, len, NULL);
         if (ret < 0) {
             fprintf(stderr, "error: cannot allocate extent, errno = %s\n", 
                 strerror(-ret));

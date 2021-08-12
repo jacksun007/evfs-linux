@@ -48,7 +48,7 @@ int main(int argc, char * argv[])
     
     ret = extent_active(evfs, extent.addr, extent.len, EVFS_ALL);
     if (ret < 0) {
-        fprintf(stderr, "error during extent_alloc, errno = %s\n", 
+        fprintf(stderr, "error during extent_active, errno = %s\n", 
             strerror(-ret));
         goto done;
     }
