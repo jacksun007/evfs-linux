@@ -48,7 +48,7 @@ int main(int argc, char * argv[])
     else
         extent.addr = 0;
     
-    ret = extent_alloc(evfs, extent.addr, extent.len, 0);
+    ret = extent_alloc(evfs, extent.addr, extent.len, NULL);
     if (ret < 0) {
         fprintf(stderr, "error: cannot allocate extent, errno = %s\n", 
             strerror(-ret));

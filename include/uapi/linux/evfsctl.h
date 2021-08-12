@@ -55,6 +55,11 @@ struct evfs_extent_op {
     u64 flags;
 };
 
+struct evfs_extent_alloc_op {
+    struct evfs_extent extent;
+    struct evfs_extent_attr * attr;
+};
+
 struct evfs_dirent_add_op {
     long dir_nr;
     long ino_nr;
@@ -154,6 +159,8 @@ enum evfs_opcode {
     EVFS_INODE_READ,    // same as posix read()
     EVFS_EXTENT_READ,   // read raw data from extent
 
+    EVFS_REVERSE_MAP,   // read reverse mapping of block/extent
+
     EVFS_READ_OP_END,
 
     // write operations
@@ -179,6 +186,8 @@ enum evfs_opcode {
 
     // inode-specific operations
     EVFS_INODE_MAP,
+    
+    EVFS_METADATA_MOVE,
 
     EVFS_WRITE_OP_END,
 };

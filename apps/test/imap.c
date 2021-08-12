@@ -58,7 +58,7 @@ int main(int argc, char * argv[])
     }
 
     // TODO: use evfs functions to remap input data file
-    ret = extent_alloc(evfs, 0, 1, 0);
+    ret = extent_alloc(evfs, 0, 1, NULL);
     if (ret < 0) {
         fprintf(stderr, "error: cannot allocate extent, errno = %s\n",
             strerror(-ret));

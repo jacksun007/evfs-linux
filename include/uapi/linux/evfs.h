@@ -81,6 +81,12 @@ struct evfs_rmap {
     struct evfs_rmentry entry[];
 };
 
+struct evfs_extent_attr {
+    u32 type;
+    u32 flags;
+    struct evfs_extent exclude;
+};
+
 struct evfs_metadata {
     u64 blkaddr;
     u64 size;   // Block-level granularity
@@ -128,14 +134,16 @@ enum evfs_field {
     // TODO: add fields of other objects
 };
 
+// TODO: some of these flags should be "hidden"
 enum evfs_flag {
     EVFS_ANY = 1,
     EVFS_ALL = 2,
     EVFS_NOT = 3,
-    EVFS_FORCED = 4,
+    EVFS_EXACT = 4,
+    EVFS_FORCED = 5,
     
-    EVFS_FREE_SPACE = 5,
-    EVFS_USED_SPACE = 6,
+    EVFS_FREE_SPACE = 6,
+    EVFS_USED_SPACE = 7,
 };
 
 #endif // UAPI_EVFS_H_

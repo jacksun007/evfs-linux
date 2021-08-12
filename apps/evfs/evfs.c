@@ -158,9 +158,15 @@ extent_operation(evfs_t * evfs, int type, u64 pa, u64 len, int flags)
     return evfs_operation(evfs, type, &ext_op);
 }
 
-int extent_alloc(evfs_t * evfs, u64 pa, u64 len, int flags)
+int extent_alloc(evfs_t * evfs, u64 pa, u64 len, struct evfs_extent_attr * at)
 {
-    return extent_operation(evfs, EVFS_EXTENT_ALLOC, pa, len, flags);
+    struct evfs_extent_alloc_op op;
+    
+    op.extent.addr = pa;
+    op.extent.len = len;
+    op.attr = at;
+
+    return evfs_operation(evfs, EVFS_EXTENT_ALLOC, &op);
 }
 
 int extent_active(evfs_t * evfs, u64 pa, u64 len, int flags)

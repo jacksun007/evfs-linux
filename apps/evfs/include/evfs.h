@@ -48,7 +48,7 @@ int iter_count(evfs_iter_t * it);
 // Extent
 // Note: You may only free/write to extents that you allocated yourself,
 //       and it hasn't been mapped to another inode.
-int extent_alloc(evfs_t * evfs, u64 pa, u64 len, int flags);
+int extent_alloc(evfs_t * evfs, u64 pa, u64 len, struct evfs_extent_attr * at);
 int extent_active(evfs_t * evfs, u64 pa, u64 len, int flags);
 int extent_free(evfs_t * evfs, u64 pa, u64 len, int flags);
 int extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
@@ -79,6 +79,7 @@ void imap_free(struct evfs_imap * imap);
 // reverse mapping
 int reverse_map(evfs_t * evfs, u64 pa, struct evfs_rmap ** rmptr);
 void rmap_free(struct evfs_rmap * rmap);
+int metadata_move(evfs_t * evfs, struct evfs_rmap * rmap, int idx);
 
 // atomic interface
 struct evfs_atomic * atomic_begin(evfs_t * evfs);
