@@ -388,7 +388,6 @@ ext4_evfs_inode_map(struct file * filp, void __user * arg)
 		goto clean_inode;
 	}
 	else if (ext4_has_inline_data(inode)) {
-		/* TODO: Handle inline data by removing it */
 		ext4_msg(sb, KERN_ERR, "evfs_inode_map: "
 				"inode contains inline data");
 		err = -ENOSYS;
@@ -925,8 +924,6 @@ ext4_evfs_imap_info(struct file *filp, struct evfs_imap_param __user *uparam)
 		return -ENOENT;
 
 	return __ioctl_fiemap(request_inode, param.fiemap);
-
-	return 0;
 }
 
 static long
