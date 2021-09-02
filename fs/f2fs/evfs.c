@@ -1172,13 +1172,12 @@ out:
 
 
 long
-f2fs_evfs_meta_move(struct super_block *sb, unsigned long arg)
+f2fs_evfs_meta_move(struct super_block *sb, void __user * arg)
 {
 	struct f2fs_sb_info *sbi = F2FS_SB(sb);
 	struct evfs_meta_mv_ops op;
 
-	if (copy_from_user(&op, (struct evfs_meta_mv_ops __user *) arg,
-				sizeof(struct evfs_meta_mv_ops)))
+	if (copy_from_user(&op, arg, sizeof(struct evfs_meta_mv_ops)))
 		return -EFAULT;
 
 	return __metadata_move(sbi, op.md.blkaddr, op.to_blkaddr);
@@ -1228,8 +1227,7 @@ f2fs_evfs_prepare_extent_alloc(struct super_block * sb, void * arg)
     struct evfs_extent extent;
     struct f2fs_sb_info * sbi = F2FS_SB(sb);
 
-    long ret = copy_from_user(&extent, (struct evfs_extent __user *)arg, 
-                         sizeof(struct evfs_extent));
+    long ret = copy_from_user(&extent, arg, sizeof(struct evfs_extent));
     if (ret != 0) {
         return -EFAULT;
     }
@@ -1258,24 +1256,41 @@ f2fs_evfs_segment_lock(struct super_block * sb, struct evfs_lockable * lkb)
     struct f2fs_sb_info *sbi = F2FS_SB(sb);
     struct sit_info *sit_i = SIT_I(sbi);
 	struct curseg_info * curseg;
-	unsigned long remain, requested_len = lkb->data;
+	struct evfs_extent_alloc_op op;
+	struct evfs_extent_attr attr;
+	unsigned long remain, requested_len;
+	int temperature = CURSEG_WARM_DATA;
+	long ret;
 
     /* for now, just support flexible allocation */
     if (lkb->object_id != 0) {
         return -ENOSYS;
     }
     
-    curseg = CURSEG_I(sbi, CURSEG_WARM_DATA);
+    ret = evfs_copy_extent_alloc(&op, &attr, lkb->entry->data);
+    if (ret != 0) {
+        return -EFAULT;
+    }
+    
+    if (op.attr != NULL) {
+        if (attr.metadata == 1) {
+            temperature = CURSEG_WARM_NODE;
+        }
+    }
+    
+    requested_len = op.extent.len;
+    curseg = CURSEG_I(sbi, temperature);
     mutex_lock(&curseg->curseg_mutex);
     
     /* during prepare, we already verified that requested_len < 512 */
     remain = sbi->blocks_per_seg - curseg->next_blkoff;  
     if (remain < requested_len) {
-        printk("%lu < %lu, must switch segment\n", remain, requested_len);
+        printk("%lu < %lu, must switch segment, temperature = %d\n", remain, 
+            requested_len, temperature);
         mutex_unlock(&curseg->curseg_mutex);
 
-        sit_i->s_ops->allocate_segment(sbi, CURSEG_WARM_DATA, false);
-        curseg = CURSEG_I(sbi, CURSEG_WARM_DATA);
+        sit_i->s_ops->allocate_segment(sbi, temperature, false);
+        curseg = CURSEG_I(sbi, temperature);
         mutex_lock(&curseg->curseg_mutex);
         printk("new segment blkoff = %u\n", curseg->next_blkoff);
     }
@@ -1297,19 +1312,26 @@ f2fs_evfs_extent_alloc(struct file * filp, void __user * arg)
 {
 	struct super_block *sb = file_inode(filp)->i_sb;
 	struct f2fs_sb_info *sbi = F2FS_SB(sb);
-	struct evfs_extent_alloc_op ext_op;
     struct evfs_extent * extent;
     struct curseg_info *curseg;
+    struct evfs_extent_alloc_op op;
+    struct evfs_extent_attr attr;
     unsigned long blkaddr, end;
-	long ret = 0;
+    int temperature = CURSEG_WARM_DATA;
+    
+    long ret = evfs_copy_extent_alloc(&op, &attr, arg);
+    if (ret != 0) {
+        return -EFAULT;
+    }
+    
+    if (op.attr != NULL) {
+        if (attr.metadata == 1) {
+            temperature = CURSEG_WARM_NODE;
+        }
+    }
 
-    if (copy_from_user(&ext_op, arg, sizeof(struct evfs_extent_alloc_op)))
-		return -EFAULT;
-
-    // TODO (jsun): currently ignoring attr field
-
-    extent = &ext_op.extent;
-    curseg = CURSEG_I(sbi, CURSEG_WARM_DATA);
+    extent = &op.extent;
+    curseg = CURSEG_I(sbi, temperature);
 	extent->addr = blkaddr = START_BLOCK(sbi, curseg->segno) + curseg->next_blkoff;	
 	end = extent->addr + extent->len;
 
@@ -1345,10 +1367,21 @@ f2fs_evfs_segment_unlock(struct super_block * sb, struct evfs_lockable * lkb)
 {
     struct f2fs_sb_info * sbi = F2FS_SB(sb);
     struct sit_info * sit_i = SIT_I(sbi);
-    struct curseg_info * curseg = curseg = CURSEG_I(sbi, CURSEG_WARM_DATA);
+    struct curseg_info * curseg;
+    struct evfs_extent_alloc_op op;
+	struct evfs_extent_attr attr;
+    int temperature = CURSEG_WARM_DATA;
     
-    // we don't need to look at object_id now since we always lock curseg
-    (void)lkb;
+    long ret = evfs_copy_extent_alloc(&op, &attr, lkb->entry->data);
+    BUG_ON(ret != 0);
+    
+    if (op.attr != NULL) {
+        if (attr.metadata == 1) {
+            temperature = CURSEG_WARM_NODE;
+        }
+    }
+ 
+    curseg = CURSEG_I(sbi, temperature);
     mutex_unlock(&sit_i->sentry_lock);
 	mutex_unlock(&curseg->curseg_mutex);
 	
@@ -1635,6 +1668,9 @@ f2fs_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
     case EVFS_INODE_WRITE:
         err = evfs_inode_write(aa->sb, op->data, &find_get_page);
 		break;
+    case EVFS_METADATA_MOVE:
+        err = f2fs_evfs_meta_move(aa->sb, op->data);
+        break;
     case EVFS_SUPER_UPDATE:
     case EVFS_DIRENT_UPDATE:    
     case EVFS_DIRENT_INFO:

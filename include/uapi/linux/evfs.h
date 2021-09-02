@@ -22,7 +22,7 @@ struct evfs_extent {
     u64 len;        // number of blocks
 };
 
-struct evfs_extent_group {
+struct evfs_group {
     u64 addr;       
     u64 len;
     u64 block_count;    // number of blocks used
@@ -69,7 +69,7 @@ struct evfs_inode {
 
 struct evfs_rmentry {
     u64 ino_nr;     // if 0, does not belong to any inode
-    u64 log_addr;     // if type is data, refers to logical address
+    u64 log_addr;   // if type is data, refers to logical address
 };
 
 struct evfs_rmap {
@@ -79,12 +79,6 @@ struct evfs_rmap {
     u16 count;
     u16 capacity;
     struct evfs_rmentry entry[];
-};
-
-struct evfs_extent_attr {
-    u32 type;
-    u32 flags;
-    struct evfs_extent exclude;
 };
 
 struct evfs_metadata {
@@ -101,6 +95,21 @@ struct evfs_metadata {
      */
     u64 region_start;
     u64 region_len;
+    
+    /*
+    u64 log_addr;
+    u64 phy_addr;
+    u64 len;
+    u64 ino_nr;
+    u32 type;
+    */
+};
+
+struct evfs_extent_attr {
+    u32 flags;
+    u16 type;
+    unsigned metadata : 1;
+    struct evfs_extent range;
 };
 
 // mapping entry
@@ -145,6 +154,19 @@ enum evfs_flag {
     EVFS_FREE_SPACE = 6,
     EVFS_USED_SPACE = 7,
 };
+
+
+static inline int
+rmap_to_metadata(struct evfs_metadata * md, const struct evfs_rmap * rm, int i)
+{
+    if (md == NULL || rm == NULL)
+        return -EINVAL;
+    
+    if (i < 0 || i >= rm->count)
+        return -EINVAL;
+        
+    // TODO: the actual copy
+}
 
 #endif // UAPI_EVFS_H_
 

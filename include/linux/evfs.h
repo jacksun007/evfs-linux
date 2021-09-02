@@ -25,9 +25,9 @@ struct evfs_op {
 // note that for dirent operations, the parent directory is locked
 struct evfs_lockable {
     unsigned type;
-    int exclusive;              // read or write lock?
-    unsigned long object_id;
-    unsigned long data;
+    int exclusive;                  // read or write lock?
+    unsigned long object_id;    
+    struct evfs_opentry * entry;    // entry related to the lockable
 };
 
 struct evfs_atomic_op {
@@ -74,6 +74,10 @@ long evfs_extent_in_range(struct file * filp, const struct evfs_extent * ext);
 long evfs_add_my_extent(struct file * filp, const struct evfs_extent * ext);
 long evfs_remove_my_extent(struct file * filp, const struct evfs_extent * ext);
 long evfs_list_my_extents(struct file * filp);
+
+// copy functions
+long evfs_copy_extent_alloc(struct evfs_extent_alloc_op * optr,
+                            struct evfs_extent_attr * aptr, void __user * arg);
 
 // note: need to kfree the structure at end of function
 long evfs_imap_from_user(struct evfs_imap ** imptr, void __user * arg);

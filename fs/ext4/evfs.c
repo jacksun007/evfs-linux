@@ -727,11 +727,8 @@ ext4_evfs_extent_alloc(struct file * filp, struct evfs_opentry * op)
 		return -EFAULT;
 
 	if (!extent.addr) {
-		if (!op->lkb->object_id) {
-			ext4_msg(sb, KERN_ERR, "Both extent address and lockable address is NULL");
-			return -ENOMEM;
-		}
-		extent.addr = op->lkb->object_id;
+		ext4_msg(sb, KERN_ERR, "Extent address is still NULL after lock");
+		return -ENOMEM;
 	}
 
 	ext4_get_group_no_and_offset(sb, extent.addr, &group, &off_block);
@@ -961,8 +958,16 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	struct ext4_buddy e4b;
 	ext4_group_t group;
 	ext4_grpblk_t offset;
-	unsigned long addr = lkb->object_id, len = lkb->data;
-
+	unsigned long addr = lkb->object_id, len;
+	struct evfs_extent_alloc_op op;
+	struct evfs_extent_attr attr;
+	long ret;
+	
+	ret = evfs_copy_extent_alloc(&op, &attr, lkb->entry->data);
+	if (ret < 0)
+	    return ret;
+	
+    len = op.extent.len;
 	ext4_get_group_no_and_offset(sb, addr, &group, &offset);
 
 	if (!addr) {
@@ -972,8 +977,9 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 			grp = ext4_get_group_info(sb, group);
 			ext4_mb_unload_buddy(&e4b);
 			if (len <= grp->bb_free) {
-				lkb->object_id = group * EXT4_BLOCKS_PER_GROUP(sb)
-					+ grp->bb_first_free;
+				op.extent.addr = group * EXT4_BLOCKS_PER_GROUP(sb)
+					             + grp->bb_first_free;
+			    copy_to_user(lkb->entry->data, &op, sizeof(struct evfs_extent));
 				goto lock;
 			}
 		}

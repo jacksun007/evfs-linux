@@ -667,12 +667,13 @@ fail:
     (l)->type = EVFS_TYPE_INVALID; \
     (l)->object_id = 0; \
     (l)->exclusive = 0; \
+    (l)->entry = NULL; \
 } while(0)
 
 static
 struct evfs_lockable *
 evfs_add_lockable(struct evfs_lockable * lk, int type, unsigned long id,
-                  int ex, unsigned long data)
+                  int ex, struct evfs_opentry * entry)
 {
     struct evfs_lockable * lkb = lk;
 
@@ -686,11 +687,6 @@ evfs_add_lockable(struct evfs_lockable * lk, int type, unsigned long id,
                 lkb->exclusive = 1;
             }
 
-            if (lkb->data != data) {
-                printk("evfs warning: duplicate object id with different "
-                       " data in lock set\n");
-            }
-
             return lkb;
         }
 
@@ -701,7 +697,7 @@ evfs_add_lockable(struct evfs_lockable * lk, int type, unsigned long id,
     lkb->type = type;
     lkb->object_id = id;
     lkb->exclusive = ex;
-    lkb->data = data;
+    lkb->entry = entry;
 
     /* invalidate last entry */
     INVALIDATE_LOCKABLE(lkb + 1);
@@ -710,48 +706,49 @@ evfs_add_lockable(struct evfs_lockable * lk, int type, unsigned long id,
 
 static
 long
-evfs_add_inode_lockable(struct evfs_lockable * lk, int ex, void * arg)
+evfs_add_inode_lockable(struct evfs_lockable * lk, int ex, 
+                        struct evfs_opentry * entry)
 {
     unsigned long ino_nr;
-    long ret = copy_from_user(&ino_nr, (unsigned long __user *)arg,
-                         sizeof(unsigned long));
+    long ret = copy_from_user(&ino_nr, entry->data, sizeof(unsigned long));
     if (ret != 0) {
         return -EFAULT;
     }
 
-    evfs_add_lockable(lk, EVFS_TYPE_INODE, ino_nr, ex, 0);
+    evfs_add_lockable(lk, EVFS_TYPE_INODE, ino_nr, ex, entry);
     return 0;
 }
 
 static
-struct evfs_lockable *
-__evfs_add_extent_lockable(struct evfs_lockable * lk, int t, int ex, void * arg)
+long
+__evfs_add_extent_lockable(struct evfs_lockable * lk, int t, int ex, 
+                           struct evfs_opentry * entry)
 {
     struct evfs_extent extent;
-    struct evfs_lockable *lkb;
 
-    long ret = copy_from_user(&extent, (struct evfs_extent __user *)arg,
-                         sizeof(struct evfs_extent));
+    long ret = copy_from_user(&extent, entry->data, sizeof(struct evfs_extent));
     if (ret != 0) {
-	return ERR_PTR(-EFAULT);
+	return -EFAULT;
     }
 
-    lkb = evfs_add_lockable(lk, t, extent.addr, ex, extent.len);
-    return lkb;
+    evfs_add_lockable(lk, t, extent.addr, ex, entry);
+    return 0;
 }
 
 static
-struct evfs_lockable *
-evfs_add_extent_group_lockable(struct evfs_lockable * lk, int ex, void * arg)
+long
+evfs_add_extent_group_lockable(struct evfs_lockable * lk, int ex, 
+                               struct evfs_opentry * entry)
 {
-    return __evfs_add_extent_lockable(lk, EVFS_TYPE_EXTENT_GROUP, ex, arg);
+    return __evfs_add_extent_lockable(lk, EVFS_TYPE_EXTENT_GROUP, ex, entry);
 }
 
 static
-struct evfs_lockable *
-evfs_add_extent_lockable(struct evfs_lockable * lk, int ex, void * arg)
+long
+evfs_add_extent_lockable(struct evfs_lockable * lk, int ex,
+                         struct evfs_opentry * entry)
 {
-    return __evfs_add_extent_lockable(lk, EVFS_TYPE_EXTENT, ex, arg);
+    return __evfs_add_extent_lockable(lk, EVFS_TYPE_EXTENT, ex, entry);
 }
 
 static
@@ -774,7 +771,6 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
 
     for (i = 0; i < aa->param.count; i++) {
         struct evfs_opentry * entry = &aa->param.item[i];
-	struct evfs_lockable * curr_lk;
 
         if (IS_EVFS_COMP_OP(entry->code)) {
             continue;
@@ -787,16 +783,16 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
             aa->param.errop = entry->id;
             goto fail;
         }
-
+        
         ret = 0;
         switch (entry->code) {
             case EVFS_INODE_INFO:
             case EVFS_INODE_READ:
             case EVFS_INODE_ACTIVE:
-                ret = evfs_add_inode_lockable(lockable, 0, entry->data);
+                ret = evfs_add_inode_lockable(lockable, 0, entry);
                 break;
             case EVFS_SUPER_INFO:
-                evfs_add_lockable(lockable, EVFS_TYPE_SUPER, 0, 0, 0);
+                evfs_add_lockable(lockable, EVFS_TYPE_SUPER, 0, 0, entry);
                 break;
             case EVFS_EXTENT_ACTIVE:
                 /* TODO: do not need to lock here */
@@ -809,28 +805,16 @@ evfs_new_lock_set(struct evfs_atomic_action * aa, struct evfs_lockable ** lp)
             case EVFS_INODE_WRITE:
             case EVFS_INODE_MAP:
             case EVFS_INODE_FREE:
-                ret = evfs_add_inode_lockable(lockable, 1, entry->data);
+                ret = evfs_add_inode_lockable(lockable, 1, entry);
                 break;
             case EVFS_SUPER_UPDATE:
-                evfs_add_lockable(lockable, EVFS_TYPE_SUPER, 0, 0, 0);
+                evfs_add_lockable(lockable, EVFS_TYPE_SUPER, 0, 0, entry);
                 break;
             case EVFS_EXTENT_ALLOC:
-                curr_lk = evfs_add_extent_group_lockable(lockable, 1, entry->data);
-		if (IS_ERR(curr_lk)) {
-			ret = PTR_ERR(curr_lk);
-		} else {
-			entry->lkb = curr_lk;
-			ret = 0;
-		}
+                ret = evfs_add_extent_group_lockable(lockable, 1, entry);
                 break;
             case EVFS_EXTENT_FREE:
-                curr_lk = evfs_add_extent_lockable(lockable, 1, entry->data);
-		if (IS_ERR(curr_lk)) {
-			ret = PTR_ERR(curr_lk);
-		} else {
-			entry->lkb = curr_lk;
-			ret = 0;
-		}
+                ret = evfs_add_extent_lockable(lockable, 1, entry);
                 break;
             case EVFS_INODE_ALLOC:
             case EVFS_DIRENT_ADD:
@@ -989,7 +973,7 @@ evfs_run_atomic_action(struct file * filp,
                    lkb->type, lkb->object_id);
             goto unlock;
         }
-	printk("lkb->object_id = %lu\n", lkb->object_id);
+	    //printk("lkb->object_id = %lu\n", lkb->object_id);
         i++; lkb++;
     }
 
@@ -1434,4 +1418,25 @@ evfs_remove_my_inode(struct file * filp, u64 ino_nr)
     (void)ino_nr;
     return -ENOSYS;
 }
+
+long
+evfs_copy_extent_alloc(struct evfs_extent_alloc_op * optr,
+                       struct evfs_extent_attr * aptr, void __user * arg)
+{
+    long ret = copy_from_user(optr, arg, sizeof(struct evfs_extent_alloc_op));
+    if (ret != 0) {
+        return -EFAULT;
+    }
+    
+    if (optr->attr != NULL) {
+        ret = copy_from_user(aptr, optr->attr, sizeof(struct evfs_extent_attr));
+        if (ret != 0) {
+            return -EFAULT;
+        }
+    }
+    
+    return 0; 
+}
+
+
 

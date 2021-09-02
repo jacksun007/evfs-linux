@@ -197,7 +197,6 @@ struct evfs_opentry {
     int id;
     void * data;
     u64 result;
-    struct evfs_lockable * lkb; /* lockable associated to this entry */
 };
 
 struct evfs_atomic_action_param {
@@ -239,6 +238,8 @@ struct evfs_imap_param {
 #define FS_IOC_INODE_ITERATE _IOR('f', 72, struct evfs_iter_ops)
 #define FS_IOC_EVFS_OPEN _IOR('f', 73, long)
 #define FS_IOC_LIST_MY_EXTENTS _IOR('f', 74, long)
+#define FS_IOC_BLOCK_ITERATE _IOR('f', 75, struct evfs_iter_ops)
+#define FS_IOC_METADATA_ITERATE _IOR('f', 76, struct evfs_iter_ops)
 
 #endif // UAPI_EVFSCTL_H_
 
