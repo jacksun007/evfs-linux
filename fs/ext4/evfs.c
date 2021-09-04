@@ -748,6 +748,14 @@ ext4_evfs_extent_alloc(struct file * filp, struct evfs_opentry * op)
 	ac.ac_flags = EXT4_MB_HINT_TRY_GOAL | EXT4_MB_EVFS;
 	ac.ac_inode = NULL;
 
+	printk("Alloc called for addr %lu in group %d\n", extent.addr, group);
+
+	/* TODO: Obsolete now? */
+	/* if (ext_op.flags & EVFS_EXTENT_ALLOC_FIXED) { */
+	/* 	ext4_msg(sb, KERN_ERR, "Hint goal only!"); */
+	/* 	ac.ac_flags |= EXT4_MB_HINT_GOAL_ONLY; */
+	/* } */
+
 	err = ext4_mb_regular_allocator(&ac);
 	if (err) {
 		ext4_error(sb, "ext4_mb_find_by_goal ERROR");
@@ -953,6 +961,7 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	struct ext4_buddy e4b;
 	ext4_group_t group;
 	ext4_grpblk_t offset;
+<<<<<<< HEAD
 	unsigned long addr = lkb->object_id, len;
 	struct evfs_extent_alloc_op op;
 	struct evfs_extent_attr attr;
@@ -963,6 +972,12 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	    return ret;
 	
     len = op.extent.len;
+=======
+	unsigned long addr = lkb->object_id, len = lkb->data;
+
+	printk("Group lock called\n");
+
+>>>>>>> 1dab7bfd6bd8 (Fix kernel fault on ext4 defrag)
 	ext4_get_group_no_and_offset(sb, addr, &group, &offset);
 
 	if (!addr) {
@@ -995,6 +1010,8 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	}
 
 lock:
+	printk("Locking group %d\n", group);
+
 	ext4_lock_group(sb, group);
 
 	return 0;
@@ -1106,6 +1123,10 @@ ext4_evfs_lock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable)
 		err = ext4_evfs_ino_group_lock(aa->sb, lockable);
 		break;
 	case EVFS_TYPE_EXTENT:
+<<<<<<< HEAD
+=======
+		err = ext4_evfs_ext_group_lock(aa->sb, lockable);
+>>>>>>> 1dab7bfd6bd8 (Fix kernel fault on ext4 defrag)
 		break;
 	case EVFS_TYPE_DIRENT:
 	case EVFS_TYPE_METADATA:
@@ -1132,6 +1153,10 @@ ext4_evfs_unlock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable
 		ext4_evfs_ino_group_unlock(aa->sb, lockable);
 		break;
 	case EVFS_TYPE_EXTENT:
+<<<<<<< HEAD
+=======
+		ext4_evfs_ext_group_unlock(aa->sb, lockable);
+>>>>>>> 1dab7bfd6bd8 (Fix kernel fault on ext4 defrag)
 		break;
 	case EVFS_TYPE_DIRENT:
 	case EVFS_TYPE_METADATA:
