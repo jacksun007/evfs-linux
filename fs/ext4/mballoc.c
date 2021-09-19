@@ -804,7 +804,7 @@ static int ext4_mb_init_cache(struct page *page, char *incore, gfp_t gfp)
 			bh[i] = NULL;
 			continue;
 		}
-		bh[i] = ext4_read_block_bitmap_nowait(sb, group);
+		bh[i] = ext4_read_block_bitmap_nowait(sb, group, 0);
 		if (IS_ERR(bh[i])) {
 			err = PTR_ERR(bh[i]);
 			bh[i] = NULL;
@@ -2122,7 +2122,8 @@ repeat:
 			if (err)
 				goto out;
 
-			if (!(ac->ac_flags & EXT4_MB_EVFS))
+			if (!(ac->ac_flags & EXT4_MB_EVFS)
+					|| ac->ac_g_ex.fe_group != group)
 				ext4_lock_group(sb, group);
 
 			/*
@@ -2131,7 +2132,8 @@ repeat:
 			 */
 			ret = ext4_mb_good_group(ac, group, cr);
 			if (ret <= 0) {
-				if (!(ac->ac_flags & EXT4_MB_EVFS))
+				if (!(ac->ac_flags & EXT4_MB_EVFS)
+						|| ac->ac_g_ex.fe_group != group)
 					ext4_unlock_group(sb, group);
 				ext4_mb_unload_buddy(&e4b);
 				if (!first_err)
@@ -2148,7 +2150,8 @@ repeat:
 			else
 				ext4_mb_complex_scan_group(ac, &e4b);
 
-			if (!(ac->ac_flags & EXT4_MB_EVFS))
+			if (!(ac->ac_flags & EXT4_MB_EVFS)
+						|| ac->ac_g_ex.fe_group != group)
 				ext4_unlock_group(sb, group);
 			ext4_mb_unload_buddy(&e4b);
 

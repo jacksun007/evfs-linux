@@ -339,6 +339,7 @@ ext4_evfs_inode_alloc(struct super_block * sb, void __user * arg)
 	i.ino_nr = new_inode->i_ino;
 	iput(new_inode);
 
+	writeback_inodes_sb(sb, WB_REASON_SYNC);
 	if (copy_to_user((struct evfs_inode __user *) arg, &i, sizeof(i)))
 		return -EFAULT;
 	return 0;
@@ -622,7 +623,7 @@ __ext4_evfs_extent_free(struct super_block * sb, const struct evfs_extent * ext)
 	fex.fe_group = group;
 	fex.fe_len = ext->len;
 
-	bitmap_bh = ext4_read_block_bitmap(sb, group);
+	bitmap_bh = ext4_read_block_bitmap_nolock(sb, group);
 	if (IS_ERR(bitmap_bh)) {
 		err = PTR_ERR(bitmap_bh);
 		bitmap_bh = NULL;
@@ -746,12 +747,6 @@ ext4_evfs_extent_alloc(struct file * filp, struct evfs_opentry * op)
 	ac.ac_status = AC_STATUS_CONTINUE;
 	ac.ac_flags = EXT4_MB_HINT_TRY_GOAL | EXT4_MB_EVFS;
 	ac.ac_inode = NULL;
-
-	/* TODO: Obsolete now? */
-	/* if (ext_op.flags & EVFS_EXTENT_ALLOC_FIXED) { */
-	/* 	ext4_msg(sb, KERN_ERR, "Hint goal only!"); */
-	/* 	ac.ac_flags |= EXT4_MB_HINT_GOAL_ONLY; */
-	/* } */
 
 	err = ext4_mb_regular_allocator(&ac);
 	if (err) {
@@ -1111,6 +1106,7 @@ ext4_evfs_lock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable)
 		err = ext4_evfs_ino_group_lock(aa->sb, lockable);
 		break;
 	case EVFS_TYPE_EXTENT:
+		break;
 	case EVFS_TYPE_DIRENT:
 	case EVFS_TYPE_METADATA:
 		break;
@@ -1136,6 +1132,7 @@ ext4_evfs_unlock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable
 		ext4_evfs_ino_group_unlock(aa->sb, lockable);
 		break;
 	case EVFS_TYPE_EXTENT:
+		break;
 	case EVFS_TYPE_DIRENT:
 	case EVFS_TYPE_METADATA:
 		break;
