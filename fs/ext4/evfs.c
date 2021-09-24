@@ -961,7 +961,6 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	struct ext4_buddy e4b;
 	ext4_group_t group;
 	ext4_grpblk_t offset;
-<<<<<<< HEAD
 	unsigned long addr = lkb->object_id, len;
 	struct evfs_extent_alloc_op op;
 	struct evfs_extent_attr attr;
@@ -970,14 +969,8 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	ret = evfs_copy_extent_alloc(&op, &attr, lkb->entry->data);
 	if (ret < 0)
 	    return ret;
-	
-    len = op.extent.len;
-=======
-	unsigned long addr = lkb->object_id, len = lkb->data;
 
-	printk("Group lock called\n");
-
->>>>>>> 1dab7bfd6bd8 (Fix kernel fault on ext4 defrag)
+	len = op.extent.len;
 	ext4_get_group_no_and_offset(sb, addr, &group, &offset);
 
 	if (!addr) {
@@ -1123,10 +1116,6 @@ ext4_evfs_lock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable)
 		err = ext4_evfs_ino_group_lock(aa->sb, lockable);
 		break;
 	case EVFS_TYPE_EXTENT:
-<<<<<<< HEAD
-=======
-		err = ext4_evfs_ext_group_lock(aa->sb, lockable);
->>>>>>> 1dab7bfd6bd8 (Fix kernel fault on ext4 defrag)
 		break;
 	case EVFS_TYPE_DIRENT:
 	case EVFS_TYPE_METADATA:
@@ -1153,10 +1142,6 @@ ext4_evfs_unlock(struct evfs_atomic_action * aa, struct evfs_lockable * lockable
 		ext4_evfs_ino_group_unlock(aa->sb, lockable);
 		break;
 	case EVFS_TYPE_EXTENT:
-<<<<<<< HEAD
-=======
-		ext4_evfs_ext_group_unlock(aa->sb, lockable);
->>>>>>> 1dab7bfd6bd8 (Fix kernel fault on ext4 defrag)
 		break;
 	case EVFS_TYPE_DIRENT:
 	case EVFS_TYPE_METADATA:
