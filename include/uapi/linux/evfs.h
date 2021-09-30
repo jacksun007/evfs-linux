@@ -18,13 +18,19 @@ typedef long i64;
 typedef int i32;
 
 struct evfs_extent {
-    u64 addr;       // block address
-    u64 len;        // number of blocks
+    u64 addr;           // block address
+    u64 len;            // number of blocks
 };
 
-struct evfs_group {
+struct evfs_block_info {
+    u32 type;           // block type
+    u32 group_nr;       // block group of this block
+};
+
+struct evfs_group {    
     u64 addr;       
     u64 len;
+    u64 group_nr;
     u64 block_count;    // number of blocks used
 };
 
@@ -95,6 +101,7 @@ struct evfs_metadata {
      */
     u64 region_start;
     u64 region_len;
+    u64 len;
     
     /*
     u64 log_addr;
@@ -155,6 +162,10 @@ enum evfs_flag {
     EVFS_USED_SPACE = 7,
 };
 
+static inline struct evfs_extent * group_to_extent(struct evfs_group * group)
+{
+    return (struct evfs_extent *)group;
+}
 
 static inline int
 rmap_to_metadata(struct evfs_metadata * md, const struct evfs_rmap * rm, int i)

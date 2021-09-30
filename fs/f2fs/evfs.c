@@ -1747,6 +1747,9 @@ f2fs_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return f2fs_evfs_extent_iter(filp, sb, arg);
 	case FS_IOC_INODE_ITERATE:
 		return f2fs_evfs_inode_iter(filp, sb, arg);
+    case FS_IOC_BLOCK_ITERATE:
+    case FS_IOC_METADATA_ITERATE:
+        break;
 	}
 
 	return -ENOTTY;

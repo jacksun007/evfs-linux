@@ -59,6 +59,9 @@ int extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
 int extent_read(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len);
 int extent_copy(evfs_t * evfs, u64 dst, u64 src, u64 len);
 
+int block_info(evfs_t * evfs, u64 pa, struct evfs_block_info * bi);
+int group_info(evfs_t * evfs, struct evfs_group * group);
+
 // allows overwriting ANY part of the device
 int extent_write_unsafe(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
 
@@ -83,7 +86,7 @@ void imap_free(struct evfs_imap * imap);
 // reverse mapping
 int reverse_map(evfs_t * evfs, u64 pa, struct evfs_rmap ** rmptr);
 void rmap_free(struct evfs_rmap * rmap);
-int metadata_move(evfs_t * evfs, struct evfs_rmap * rmap, int idx);
+int metadata_move(evfs_t * evfs, u64 pa, struct evfs_metadata * md);
 
 // atomic interface
 struct evfs_atomic * atomic_begin(evfs_t * evfs);
