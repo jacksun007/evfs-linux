@@ -13,7 +13,9 @@
 #include <evfs.h>
 
 // turn on for debugging
-#define ALWAYS_DEFRAG
+// #define ALWAYS_DEFRAG
+
+#define VERBOSE
 
 #define eprintf(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__)
 
@@ -49,10 +51,14 @@ int should_defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long
         return 0;
     }
     
+#ifdef VERBOSE
+    printf("Inode %lu: %u map entries\n", ino_nr, imap->count); 
+#endif    
+    
     // current algorithm just checks if there are any extents that are not
     // in monotonically increasing order
     for (i = 0; i < imap->count; i++) {
-        struct evfs_imentry * e = &imap->entry[i];
+        struct evfs_imentry * e = &imap->entry[i];     
         
         // do not defrag any file with inlined data
         if (e->inlined) {
@@ -94,8 +100,6 @@ int defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr
     u64 extent_size;
     u64 byte_size;
 
-    printf("defragmenting inode %lu\n", ino_nr);
-
     inode.ino_nr = ino_nr;
     if ((ret = inode_info(evfs, &inode)) < 0)
         return ret;
@@ -127,7 +131,8 @@ int defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr
     while (nr_blocks > 0) {
         poff = extent_alloc(evfs, 0, extent_size, 0 /* no hint */);
         if (!poff) {
-	        return -ENOSPC;	// error
+            ret = -ENOSPC;
+            goto done;
         }
 
         ret = imap_append(imap, loff, poff, extent_size);
@@ -149,7 +154,7 @@ int defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr
         nr_blocks -= extent_size;
         loff += extent_size;
         extent_size = MIN(nr_blocks, sb->max_extent_size);
-        byte_size = extent_size * sb->block_size; 
+        byte_size = extent_size * sb->block_size;    
     }
     
     // atomic_execute returns positive value if atomic action is cancelled 
@@ -278,6 +283,14 @@ atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
 fail:
     atomic_end(aa);
     return ret;
+
+#if 0
+    (void)evfs;
+    (void)ino_nr;
+    (void)imap;
+    (void)mtime;
+    return 0;
+#endif
 }
 
 

@@ -1240,7 +1240,7 @@ f2fs_evfs_prepare_extent_alloc(struct super_block * sb, void * arg)
     }
     
     // requested extent size too big
-    if (extent.len >= sbi->blocks_per_seg) {
+    if (extent.len > sbi->blocks_per_seg) {
         printk("evfs: f2fs does not support allocating more than %d blocks "
                "at a time.", (int)sbi->blocks_per_seg);
         return -EINVAL;

@@ -15,12 +15,13 @@
 #include <stropts.h>
 #include "evfslib.h"
 
-static struct evfs_imap * imap_alloc(int capacity)
+static struct evfs_imap * imap_alloc(evfs_t * evfs, int capacity)
 {
     struct evfs_imap * imap = malloc(sizeof(struct evfs_imap) + 
                               sizeof(struct evfs_imentry)*capacity);
     
     if (imap != NULL) {
+        imap->handle = evfs;
         imap->count = 0;                          
         imap->capacity = capacity;
     }
@@ -31,8 +32,7 @@ static struct evfs_imap * imap_alloc(int capacity)
 struct evfs_imap * imap_new(evfs_t * evfs)
 {
     const int default_capacity = 64;
-    (void)evfs;
-    return imap_alloc(default_capacity);
+    return imap_alloc(evfs, default_capacity);
 }
 
 void imap_free(struct evfs_imap * imap)
@@ -45,7 +45,8 @@ void imap_free(struct evfs_imap * imap)
             
             // TODO: free all unassigned physical extents
             if (!entry->assigned) {
-                //extent_free(evfs, entry->phy_addr, entry->len, 0);
+                evfs_t * evfs = (evfs_t *)imap->handle;
+                extent_free(evfs, entry->phy_addr, entry->len, 0);
             } 
         }   
     }
@@ -115,7 +116,7 @@ struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr)
 		    goto fail;
 
 	    if (fiemap->fm_extent_count >= fiemap->fm_mapped_extents) {
-	        ret = imap_alloc(fiemap->fm_mapped_extents);
+	        ret = imap_alloc(evfs, fiemap->fm_mapped_extents);
 	        
 	        for (i = 0; i < fiemap->fm_mapped_extents; i++) {
 	            struct fiemap_extent * extent = &fiemap->fm_extents[i];

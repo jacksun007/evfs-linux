@@ -130,6 +130,7 @@ struct evfs_imentry {
 };
 
 struct evfs_imap {
+    void * handle;  // holds pointer to struct evfs
     u32 count;      // number of active entries
     u32 capacity;   // number of entries that fits (i.e. preallocated)
     struct evfs_imentry entry[];
