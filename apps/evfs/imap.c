@@ -48,10 +48,10 @@ void imap_free(struct evfs_imap * imap)
                 evfs_t * evfs = (evfs_t *)imap->handle;
                 extent_free(evfs, entry->phy_addr, entry->len, 0);
             } 
-        }   
-    }
-    
-    free(imap);
+        }
+        
+        free(imap);
+    } 
 }
 
 static 
@@ -144,8 +144,15 @@ fail:
     return ret;
 }
 
-int imap_append(struct evfs_imap * imap, u64 la, u64 pa, u64 len)
+int imap_append(struct evfs_imap ** imptr, u64 la, u64 pa, u64 len)
 {
+    struct evfs_imap * imap;
+    
+    if (!imptr) {
+        return -EINVAL;
+    }
+    
+    imap = *imptr;
     if (!imap) {
         return -EINVAL;
     }
@@ -169,8 +176,10 @@ int imap_append(struct evfs_imap * imap, u64 la, u64 pa, u64 len)
             return -ENOMEM;
         
         imap->capacity *= f;
+        *imptr = imap;
     }
     
+    assert(imap->count <= imap->capacity);
     imap->entry[imap->count].inlined = 0;
     imap->entry[imap->count].assigned = 0;
     imap->entry[imap->count].index = imap->count;

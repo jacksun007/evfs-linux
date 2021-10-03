@@ -135,7 +135,7 @@ int defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr
             goto done;
         }
 
-        ret = imap_append(imap, loff, poff, extent_size);
+        ret = imap_append(&imap, loff, poff, extent_size);
         if (ret < 0) {
             goto done;
         }   

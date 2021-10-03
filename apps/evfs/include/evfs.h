@@ -80,7 +80,7 @@ int extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
 // inode mapping
 struct evfs_imap * imap_new(evfs_t * evfs);
 struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr);
-int imap_append(struct evfs_imap * imap, u64 la, u64 pa, u64 len);
+int imap_append(struct evfs_imap ** imptr, u64 la, u64 pa, u64 len);
 void imap_free(struct evfs_imap * imap);
 
 // reverse mapping
