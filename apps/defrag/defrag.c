@@ -49,11 +49,7 @@ int should_defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long
     if (!imap) {
         eprintf("warning: imap_info failed on inode %lu\n", ino_nr);
         return 0;
-    }
-    
-#ifdef VERBOSE
-    printf("Inode %lu: %u map entries\n", ino_nr, imap->count); 
-#endif    
+    } 
     
     // current algorithm just checks if there are any extents that are not
     // in monotonically increasing order
@@ -113,6 +109,10 @@ int defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr
         return NOT_FRAGMENTED;
     }
           
+#ifdef VERBOSE
+    printf("Defragmenting inode %lu\n", ino_nr); 
+#endif   
+    
     // calculate how many blocks need to be allocated
     imap = imap_new(evfs);
     nr_blocks = CEILING(inode.bytesize, sb->block_size);       
@@ -166,7 +166,7 @@ int defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr
 done:    
     free(data);
     imap_free(imap);
-    return 0;
+    return ret;
 }
 
 int defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
