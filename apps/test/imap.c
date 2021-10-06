@@ -78,8 +78,17 @@ int main(int argc, char * argv[])
 
     /* the existing file uses 3 blocks. we will unmap the last 2 */
     imap = imap_new(evfs);
-    imap_append(imap, 0, pa, 1);
-    imap_append(imap, 1, 0, 2);
+    ret = imap_append(&imap, 0, pa, 1);
+    if (ret < 0) {
+        fprintf(stderr, "error during imap errno = %d\n", ret);
+        goto done;
+    }
+    
+    ret = imap_append(&imap, 1, 0, 2);
+    if (ret < 0) {
+        fprintf(stderr, "error during imap errno = %d\n", ret);
+        goto done;
+    }
 
     printf("BEFORE INODE_MAP:\n");
     print_imap_info(evfs, inode.ino_nr);

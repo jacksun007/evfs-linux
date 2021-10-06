@@ -1305,8 +1305,8 @@ __evfs_extent_in_range(struct evfs * evfs, const struct evfs_extent * ext)
         if (start >= mystart) {
             // ext is contained within myex
             if (myend >= end) {
-                printk("(%lu, %lu) in (%lu, %lu)? yes\n",
-                       start, end, mystart, myend);
+                // printk("(%lu, %lu) in (%lu, %lu)? yes\n",
+                //       start, end, mystart, myend);
                 return 1;
             }
 
@@ -1316,7 +1316,7 @@ __evfs_extent_in_range(struct evfs * evfs, const struct evfs_extent * ext)
             node = node->rb_left;
         }
 
-        printk("(%lu, %lu) in (%lu, %lu)? no\n", start, end, mystart, myend);
+        // printk("(%lu, %lu) in (%lu, %lu)? no\n", start, end, mystart, myend);
     }
 
     return 0;
