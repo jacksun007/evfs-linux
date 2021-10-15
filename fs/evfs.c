@@ -969,8 +969,8 @@ evfs_run_atomic_action(struct file * filp,
     while (lkb->type != EVFS_TYPE_INVALID) {
         ret = fop->lock(aa, lkb);
         if (ret < 0) {
-            printk("evfs warning: could not lock type = %u, id = %lu\n",
-                   lkb->type, lkb->object_id);
+            printk("evfs warning: could not lock type = %u, id = %lu. errno = %d\n",
+                   lkb->type, lkb->object_id, (int)-ret);
             goto unlock;
         }
 	    //printk("lkb->object_id = %lu\n", lkb->object_id);

@@ -23,6 +23,7 @@
 #define NOT_FRAGMENTED 1
 #define INODE_BUSY 2
 #define NOT_REGULAR 3
+#define NOT_FOUND 4
 
 static long
 atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
@@ -97,8 +98,11 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
     u64 byte_size;
 
     inode.ino_nr = ino_nr;
-    if ((ret = inode_info(evfs, &inode)) < 0)
+    if ((ret = inode_info(evfs, &inode)) < 0) {
+        if (ret == -ENOENT)
+            return NOT_FOUND;
         return ret;
+    }
 
     // TODO: need this for now because f2fs does not support directory fiemap
     if (!S_ISREG(inode.mode)) {
@@ -195,6 +199,9 @@ long defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
             ib++;
         else if (ret == NOT_REGULAR)
             total--;
+        else if (ret == NOT_FOUND) {
+            eprintf("warning: inode removed between inode_iter and inode_info\n");
+        }
         else {
             eprintf("error: unknown return value from defragment()\n");
             ret = -EINVAL;
