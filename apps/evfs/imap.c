@@ -144,7 +144,7 @@ fail:
     return ret;
 }
 
-int imap_append(struct evfs_imap ** imptr, u64 la, u64 pa, u64 len)
+long imap_append(struct evfs_imap ** imptr, u64 la, u64 pa, u64 len)
 {
     struct evfs_imap * imap;
     
@@ -195,7 +195,7 @@ int imap_append(struct evfs_imap ** imptr, u64 la, u64 pa, u64 len)
 // remove an entry at log_addr
 // the shift flag determines whether to shift all subsequent entries forward
 // by default will create a hole
-int imap_remove(struct evfs_imap * imap, u64 log_addr, int shift)
+long imap_remove(struct evfs_imap * imap, u64 log_addr, int shift)
 {
     (void)imap;
     (void)log_addr;

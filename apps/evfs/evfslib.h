@@ -44,7 +44,7 @@ typedef struct evfs_iter_s {
 } evfs_iter_t;
 
 
-int evfs_operation(struct evfs_atomic * aa, int opcode, void * data);
+long evfs_operation(struct evfs_atomic * aa, int opcode, void * data);
 
 
 #endif // EVFSLIB_H_

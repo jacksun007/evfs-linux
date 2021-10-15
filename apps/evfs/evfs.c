@@ -140,13 +140,13 @@ void iter_end(evfs_iter_t * it)
     free(it);
 }
 
-int super_info(evfs_t * evfs, struct evfs_super_block * sb)
+long super_info(evfs_t * evfs, struct evfs_super_block * sb)
 {
     return evfs_operation(evfs, EVFS_SUPER_INFO, sb);
 }
 
 static
-int
+long
 extent_operation(evfs_t * evfs, int type, u64 pa, u64 len, int flags)
 {
     struct evfs_extent_op ext_op;
@@ -158,7 +158,7 @@ extent_operation(evfs_t * evfs, int type, u64 pa, u64 len, int flags)
     return evfs_operation(evfs, type, &ext_op);
 }
 
-int extent_alloc(evfs_t * evfs, u64 pa, u64 len, struct evfs_extent_attr * at)
+long extent_alloc(evfs_t * evfs, u64 pa, u64 len, struct evfs_extent_attr * at)
 {
     struct evfs_extent_alloc_op op;
     
@@ -169,12 +169,12 @@ int extent_alloc(evfs_t * evfs, u64 pa, u64 len, struct evfs_extent_attr * at)
     return evfs_operation(evfs, EVFS_EXTENT_ALLOC, &op);
 }
 
-int extent_active(evfs_t * evfs, u64 pa, u64 len, int flags)
+long extent_active(evfs_t * evfs, u64 pa, u64 len, int flags)
 {
     return extent_operation(evfs, EVFS_EXTENT_ACTIVE, pa, len, flags);   
 }
 
-int extent_free(evfs_t * evfs, u64 pa, u64 len, int flags)
+long extent_free(evfs_t * evfs, u64 pa, u64 len, int flags)
 {
     return extent_operation(evfs, EVFS_EXTENT_FREE, pa, len, flags);
 }
@@ -190,14 +190,14 @@ set_extent_op(struct evfs_ext_rw_op * args,
     args->flags = flags;
 }
 
-int extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len)
+long extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len)
 {
     struct evfs_ext_rw_op args;
     set_extent_op(&args, pa, off, buf, len, 0);
     return evfs_operation(evfs, EVFS_EXTENT_WRITE, &args);
 }
 
-int 
+long 
 extent_write_unsafe(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len)
 {
     struct evfs_ext_rw_op args;
@@ -205,7 +205,7 @@ extent_write_unsafe(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len)
     return evfs_operation(evfs, EVFS_EXTENT_WRITE, &args);
 }
 
-int extent_read(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len)
+long extent_read(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len)
 {
     struct evfs_ext_rw_op args;
 
@@ -217,17 +217,17 @@ int extent_read(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len)
     return evfs_operation(evfs, EVFS_EXTENT_READ, &args);
 }
 
-int inode_info(evfs_t * evfs, struct evfs_inode * inode)
+long inode_info(evfs_t * evfs, struct evfs_inode * inode)
 {
     return evfs_operation(evfs, EVFS_INODE_INFO, inode);
 }
 
-int inode_update(evfs_t * evfs, struct evfs_inode * inode)
+long inode_update(evfs_t * evfs, struct evfs_inode * inode)
 {   
     return evfs_operation(evfs, EVFS_INODE_UPDATE, inode);
 }
 
-int inode_read(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len)
+long inode_read(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len)
 {
     struct evfs_inode_read_op op;
     op.data = buf;
@@ -237,7 +237,7 @@ int inode_read(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len)
     return evfs_operation(evfs, EVFS_INODE_READ, &op);
 }
 
-int inode_write(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len)
+long inode_write(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len)
 {
     struct evfs_inode_read_op op;
     op.data = buf;
@@ -247,7 +247,7 @@ int inode_write(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len)
     return evfs_operation(evfs, EVFS_INODE_WRITE, &op);
 }
 
-int inode_map(evfs_t * evfs, u64 ino_nr, struct evfs_imap * imap)
+long inode_map(evfs_t * evfs, u64 ino_nr, struct evfs_imap * imap)
 {
     struct evfs_imap_op op;
     op.ino_nr = ino_nr;

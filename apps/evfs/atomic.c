@@ -26,7 +26,7 @@ static struct atomic_action * atomic_action_new(unsigned capacity) {
     return aa;
 }
 
-static int 
+static long
 atomic_action_append(struct atomic_action * aab, int opcode, void * data)
 {
     struct evfs_atomic_action_param * aa = &aab->param;
@@ -63,9 +63,9 @@ static struct atomic_action * to_atomic_action(struct evfs_atomic * ea) {
     return aa;
 }
 
-int evfs_operation(struct evfs_atomic * evfs, int opcode, void * data)
+long evfs_operation(struct evfs_atomic * evfs, int opcode, void * data)
 {
-    int ret;
+    long ret;
     struct atomic_action * aa;
 
     if (evfs->atomic) {
@@ -108,12 +108,12 @@ struct evfs_atomic * atomic_begin(evfs_t * evfs) {
     return &aa->header;
 }
 
-int atomic_execute(struct evfs_atomic * ea)
+long atomic_execute(struct evfs_atomic * ea)
 {
     struct atomic_action * aa = to_atomic_action(ea);
     
     /* on the kernel side, we do not send in the header */
-    int ret = ioctl(ea->fd, FS_IOC_ATOMIC_ACTION, &aa->param);
+    long ret = ioctl(ea->fd, FS_IOC_ATOMIC_ACTION, &aa->param);
     
     if (ret < 0) {
         return -errno;
@@ -128,11 +128,11 @@ void atomic_end(struct evfs_atomic * ea)
 }
 
 
-int atomic_const_equal(struct evfs_atomic * ea, int id, int field, u64 rhs)
+long atomic_const_equal(struct evfs_atomic * ea, int id, int field, u64 rhs)
 {
     struct atomic_action * aa = to_atomic_action(ea);
     struct evfs_const_comp * comp = malloc(sizeof(struct evfs_const_comp));
-    int ret;
+    long ret;
     
     if (!comp) {
         return -ENOMEM;

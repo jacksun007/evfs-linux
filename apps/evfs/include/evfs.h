@@ -47,51 +47,51 @@ struct evfs_metadata * metadata_next(evfs_iter_t * it);
 void iter_end(evfs_iter_t * it);
 
 // consume iterator and return count
-int iter_count(evfs_iter_t * it);
+long iter_count(evfs_iter_t * it);
 
 // Extent
 // Note: You may only free/write to extents that you allocated yourself,
 //       and it hasn't been mapped to another inode.
-int extent_alloc(evfs_t * evfs, u64 pa, u64 len, struct evfs_extent_attr * at);
-int extent_active(evfs_t * evfs, u64 pa, u64 len, int flags);
-int extent_free(evfs_t * evfs, u64 pa, u64 len, int flags);
-int extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
-int extent_read(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len);
-int extent_copy(evfs_t * evfs, u64 dst, u64 src, u64 len);
+long extent_alloc(evfs_t * evfs, u64 pa, u64 len, struct evfs_extent_attr * at);
+long extent_active(evfs_t * evfs, u64 pa, u64 len, int flags);
+long extent_free(evfs_t * evfs, u64 pa, u64 len, int flags);
+long extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
+long extent_read(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len);
+long extent_copy(evfs_t * evfs, u64 dst, u64 src, u64 len);
 
-int block_info(evfs_t * evfs, u64 pa, struct evfs_block_info * bi);
-int group_info(evfs_t * evfs, struct evfs_group * group);
+long block_info(evfs_t * evfs, u64 pa, struct evfs_block_info * bi);
+long group_info(evfs_t * evfs, struct evfs_group * group);
 
 // allows overwriting ANY part of the device
-int extent_write_unsafe(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
+long extent_write_unsafe(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
 
 // super block
-int super_info(evfs_t * evfs, struct evfs_super_block * sb);
+long super_info(evfs_t * evfs, struct evfs_super_block * sb);
 
 // inode
-int inode_info(evfs_t * evfs, struct evfs_inode * inode);
-int inode_update(evfs_t * evfs, struct evfs_inode * inode);
-int inode_map(evfs_t * evfs, u64 ino_nr, struct evfs_imap * imap);
-int inode_read(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len);
-int inode_write(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len);
+long inode_info(evfs_t * evfs, struct evfs_inode * inode);
+long inode_update(evfs_t * evfs, struct evfs_inode * inode);
+long inode_map(evfs_t * evfs, u64 ino_nr, struct evfs_imap * imap);
+long inode_read(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len);
+long inode_write(evfs_t * evfs, u64 ino_nr, u64 off, char * buf, u64 len);
 
-int extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
+long extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len);
 
 // inode mapping
 struct evfs_imap * imap_new(evfs_t * evfs);
 struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr);
-int imap_append(struct evfs_imap ** imptr, u64 la, u64 pa, u64 len);
+long imap_append(struct evfs_imap ** imptr, u64 la, u64 pa, u64 len);
 void imap_free(struct evfs_imap * imap);
 
 // reverse mapping
-int reverse_map(evfs_t * evfs, u64 pa, struct evfs_rmap ** rmptr);
+long reverse_map(evfs_t * evfs, u64 pa, struct evfs_rmap ** rmptr);
 void rmap_free(struct evfs_rmap * rmap);
-int metadata_move(evfs_t * evfs, u64 pa, struct evfs_metadata * md);
+long metadata_move(evfs_t * evfs, u64 pa, struct evfs_metadata * md);
 
 // atomic interface
 struct evfs_atomic * atomic_begin(evfs_t * evfs);
-int atomic_const_equal(struct evfs_atomic * aa, int id, int field, u64 rhs);
-int atomic_execute(struct evfs_atomic * aa);
+long atomic_const_equal(struct evfs_atomic * aa, int id, int field, u64 rhs);
+long atomic_execute(struct evfs_atomic * aa);
 void atomic_end(struct evfs_atomic * aa);
 long atomic_result(struct evfs_atomic * aa, int id);
 

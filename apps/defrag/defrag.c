@@ -24,7 +24,7 @@
 #define INODE_BUSY 2
 #define NOT_REGULAR 3
 
-static int 
+static long
 atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
                  struct evfs_timeval * mtime);
 
@@ -38,10 +38,10 @@ int usage(char * prog)
 }
 
 // 1 for yes, 0 for no
-int should_defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr)
+long should_defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr)
 {
     struct evfs_imap * imap = imap_info(evfs, ino_nr);
-    int ret = 0;
+    long ret = 0;
     u64 end = 0;
     int num_out_of_order = 0;
     unsigned i;
@@ -85,11 +85,11 @@ done:
 #define CEILING(x,y) (((x) + (y) - 1) / (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
-int defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr)
+long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr)
 {
     struct evfs_inode inode;
     char * data = NULL;
-    int ret;
+    long ret;
     u64 poff, loff = 0;
     u64 nr_blocks;
     struct evfs_imap * imap = NULL;
@@ -129,12 +129,16 @@ int defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr
     // start allocating new contiguous extents. we have to deal with the
     // possibility that the file system has a maximum contiguous extent limit
     while (nr_blocks > 0) {
-        poff = extent_alloc(evfs, 0, extent_size, 0 /* no hint */);
-        if (!poff) {
+        ret = extent_alloc(evfs, 0, extent_size, 0 /* no hint */);
+        if (ret < 0) {
+            goto done;
+        }
+        else if (ret == 0) {
             ret = -ENOSPC;
             goto done;
         }
 
+        poff = (u64)ret;
         ret = imap_append(&imap, loff, poff, extent_size);
         if (ret < 0) {
             goto done;
@@ -169,7 +173,7 @@ done:
     return ret;
 }
 
-int defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
+long defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
 {
     evfs_iter_t * it = inode_iter(evfs, 0);
     int ret = 0, cnt = 0, nf = 0, ib = 0, total = 0;
@@ -209,7 +213,7 @@ int main(int argc, char * argv[])
 {
     evfs_t * evfs = NULL;
     struct evfs_super_block sb;
-    int ret;
+    long ret;
 
     if (argc > 3) {
         goto error;
@@ -245,16 +249,16 @@ int main(int argc, char * argv[])
     
 done:    
     evfs_close(evfs);
-    return ret;
+    return (int)ret;
 error:
     return usage(argv[0]);
 }
 
-static int 
+static long 
 atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
                  struct evfs_timeval * mtime)
 {
-    int ret, id;
+    long ret, id;
     struct evfs_atomic * aa = atomic_begin(evfs);
     struct evfs_inode inode; 
     

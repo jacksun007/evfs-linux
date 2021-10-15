@@ -882,6 +882,7 @@ f2fs_evfs_inode_info(struct super_block *sb, void __user * arg)
 	evfs_i._prop.inlined_bytes = f2fs_has_inline_data(inode) ?
 	    evfs_i.bytesize : 0;
 
+    iput(inode);
 	if (copy_to_user((struct evfs_inode __user *) arg, &evfs_i, sizeof(evfs_i)))
 		return -EFAULT;
 
@@ -1712,6 +1713,7 @@ f2fs_evfs_imap_info(struct file *filp, struct evfs_imap_param __user * uparam)
 	struct evfs_imap_param param;
 	struct inode *inode = file_inode(filp), * request_inode;
 	struct super_block *sb = inode->i_sb;
+	long ret;
 
     if (copy_from_user(&param, uparam, sizeof(param)))
 		return -EFAULT;
@@ -1720,7 +1722,10 @@ f2fs_evfs_imap_info(struct file *filp, struct evfs_imap_param __user * uparam)
 	if (IS_ERR(request_inode))
 		return -ENOENT;
 
-    return __ioctl_fiemap(request_inode, param.fiemap);
+    ret = __ioctl_fiemap(request_inode, param.fiemap);
+    
+    iput(request_inode);
+    return ret;
 }
 
 struct evfs_op f2fs_evfs_ops = {
