@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
+#include <popt.h>
 #include <evfs.h>
 
 // turn on for debugging
@@ -25,33 +26,40 @@
 #define NOT_REGULAR 3
 #define NOT_FOUND 4
 
+#define CEILING(x,y) (((x) + (y) - 1) / (y))
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+
+enum { OUT_OF_ORDER = 1, SMALL_EXTENT = 2 };
+
+struct args {
+    const char * devname;
+    int ino_nr;
+    int algo_nr;
+} args = { NULL, 0, OUT_OF_ORDER };
+
 static long
 atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
                  struct evfs_timeval * mtime);
 
-int usage(char * prog)
+static int
+usage(poptContext optCon, int exitcode, char *error, char *addl) 
 {
-    eprintf("usage: %s DEV [NUM]\n", prog);
-    eprintf("  DEV: device of the file system.\n");
-    eprintf("  NUM: Inode number of file to defragment.\n");
-    eprintf("       When not specified, defragment all files.\n");
-    return 1;
+    poptPrintUsage(optCon, stderr, 0);
+    if (error) fprintf(stderr, "%s: %s\n", error, addl);
+    exit(exitcode);
+    return 0;
 }
 
-// 1 for yes, 0 for no
-long should_defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr)
-{
-    struct evfs_imap * imap = imap_info(evfs, ino_nr);
-    long ret = 0;
-    u64 end = 0;
+static
+long
+check_out_of_order(struct evfs_imap * imap, struct evfs_super_block * sb, 
+                   struct evfs_inode * iptr)
+{ 
+    int ret = 0;
     int num_out_of_order = 0;
+    u64 end = 0;
     unsigned i;
-    
-    if (!imap) {
-        eprintf("warning: imap_info failed on inode %lu\n", ino_nr);
-        return 0;
-    } 
-    
+
     // current algorithm just checks if there are any extents that are not
     // in monotonically increasing order
     for (i = 0; i < imap->count; i++) {
@@ -59,8 +67,7 @@ long should_defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned lon
         
         // do not defrag any file with inlined data
         if (e->inlined) {
-            ret = 0;
-            goto done;
+            return 0;
         }
         
         if (end > e->phy_addr)
@@ -76,15 +83,63 @@ long should_defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned lon
         ret = 1;
 #endif
     
-    // TODO: may need to consult fields of super block in the future
+    // don't need to consult either here
+    (void)iptr;
     (void)sb;
-done:
+    return ret;
+}
+
+static
+long
+check_small_extents(struct evfs_imap * imap, struct evfs_super_block * sb, 
+                    struct evfs_inode * iptr)
+{
+    int ret = 0;
+    u64 max_extent_bytesize = sb->max_extent_size * sb->block_size;
+    u64 min_num_extents = CEILING(iptr->bytesize, max_extent_bytesize);
+
+    //printf("filesize: %lu, maxsize: %lu, min: %lu, count: %u\n",
+    //    iptr->bytesize, max_extent_bytesize, min_num_extents, imap->count);
+
+    if (imap->count > min_num_extents) {
+        ret = 1;
+    }
+
+    return ret;
+}
+
+
+// 1 for yes, 0 for no
+static
+long 
+should_defragment(evfs_t * evfs, struct evfs_super_block * sb, struct evfs_inode * iptr)
+{
+    struct evfs_imap * imap = imap_info(evfs, iptr->ino_nr);
+    long ret = 0;
+    
+    if (!imap) {
+        eprintf("warning: imap_info failed on inode %lu\n", iptr->ino_nr);
+        return 0;
+    } 
+    
+    
+    switch (args.algo_nr) {
+    case OUT_OF_ORDER:
+        ret = check_out_of_order(imap, sb, iptr);
+        break;
+    case SMALL_EXTENT:
+        ret = check_small_extents(imap, sb, iptr);
+        break;
+    default:
+        eprintf("warning: unknown algorithm #%d\n", args.algo_nr);
+        ret = 0;
+        break;
+    }
+
     imap_free(imap);
     return ret;
 }
 
-#define CEILING(x,y) (((x) + (y) - 1) / (y))
-#define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
 long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr)
 {
@@ -109,7 +164,7 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
         return NOT_REGULAR;
     }
 
-    if (!should_defragment(evfs, sb, ino_nr)) {
+    if (!should_defragment(evfs, sb, &inode)) {
         return NOT_FRAGMENTED;
     }
           
@@ -216,22 +271,46 @@ long defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
     return ret;
 }
 
-int main(int argc, char * argv[])
+int main(int argc, const char * argv[])
 {
     evfs_t * evfs = NULL;
     struct evfs_super_block sb;
     long ret;
+    int c;
 
-    if (argc > 3) {
-        goto error;
-    }
-
-    if (argc > 1) {
-        evfs = evfs_open(argv[1]);
+    poptContext optcon;   /* context for parsing command-line options */
+    struct poptOption opttab[] = {
+        { "out-of-order", 'o', 0, 0, 'o', "use out-of-order algorithm", NULL },
+        { "small-extent", 's', 0, 0, 's', "use small extent algorithm", NULL },
+        POPT_AUTOHELP
+        { NULL, 0, 0, 0, 0, NULL, NULL }
+    };
+    optcon = poptGetContext(NULL, argc, argv, opttab, 0);
+    poptSetOtherOptionHelp(optcon, "DEV [NUM]");
+    
+    if (argc < 2) {
+	    return usage(optcon, 1, NULL, NULL);
     }
     
+    while ((c = poptGetNextOpt(optcon)) >= 0) {
+        switch (c) {
+        case 'o':
+            args.algo_nr = OUT_OF_ORDER;
+            break;
+        case 's':
+            args.algo_nr = SMALL_EXTENT;
+            break;
+        }
+    } 
+    
+    if ((args.devname = poptGetArg(optcon)) == NULL) {
+        return usage(optcon, 1, "Must specify mount point", "e.g., ~/my-disk");
+    }
+    
+    evfs = evfs_open(args.devname);
     if (evfs == NULL) {
-        goto error;
+        fprintf(stderr, "Error: evfs_open failed\n");
+        goto done;
     }
     
     if ((ret = super_info(evfs, &sb)) < 0) {
@@ -240,25 +319,16 @@ int main(int argc, char * argv[])
         goto done;
     }
 
-    if (argc == 2) {
+    if (args.ino_nr == 0) {
         ret = defragment_all(evfs, &sb);
     }
-    else if (argc == 3) {
-        int ino_nr = atoi(argv[2]);
-        if (ino_nr <= 0) {
-            fprintf(stderr, "Invalid inode number: %s\n", argv[2]);
-            goto error; 
-        }
-        else {
-            ret = defragment(evfs, &sb, ino_nr);
-        }
+    else {
+        ret = defragment(evfs, &sb, args.ino_nr);
     }
     
 done:    
     evfs_close(evfs);
     return (int)ret;
-error:
-    return usage(argv[0]);
 }
 
 static long 

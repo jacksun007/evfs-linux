@@ -4,7 +4,7 @@
 
 CC := gcc
 CFLAGS := -Wall -Wextra -Werror -I../evfs/include -ggdb -L../evfs
-LOADLIBES := -levfs
+LOADLIBES := -levfs -lpopt
 EVFSDIR := ../evfs
 EVFSLIB := $(EVFSDIR)/libevfs.a
 PROG := defrag
