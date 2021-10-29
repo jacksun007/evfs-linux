@@ -120,10 +120,6 @@ should_defragment(evfs_t * evfs, struct evfs_super_block * sb, struct evfs_inode
     struct evfs_imap * imap;
     long ret = 0;
     
-    // do not defrag anything created after start time
-    if (iptr->ctime.tv_sec > (u64)args.start_time)
-        return NOT_CHECKED;
-    
     imap = imap_info(evfs, iptr->ino_nr);
     if (!imap) {
         eprintf("warning: imap_info failed on inode %lu\n", iptr->ino_nr);
@@ -166,6 +162,10 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
             return NOT_FOUND;
         return ret;
     }
+
+    // do not defrag anything created after start time
+    if (inode.ctime.tv_sec > (u64)args.start_time)
+        return NOT_CHECKED;
 
     // TODO: need this for now because f2fs does not support directory fiemap
     if (!S_ISREG(inode.mode)) {
