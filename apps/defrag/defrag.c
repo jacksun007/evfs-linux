@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
+#include <time.h>
 #include <popt.h>
 #include <evfs.h>
 
@@ -25,6 +26,7 @@
 #define INODE_BUSY 2
 #define NOT_REGULAR 3
 #define NOT_FOUND 4
+#define NOT_CHECKED 5
 
 #define CEILING(x,y) (((x) + (y) - 1) / (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
@@ -35,7 +37,8 @@ struct args {
     const char * devname;
     int ino_nr;
     int algo_nr;
-} args = { NULL, 0, OUT_OF_ORDER };
+    time_t start_time;
+} args = { NULL, 0, OUT_OF_ORDER, 0 };
 
 static long
 atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
@@ -114,9 +117,14 @@ static
 long 
 should_defragment(evfs_t * evfs, struct evfs_super_block * sb, struct evfs_inode * iptr)
 {
-    struct evfs_imap * imap = imap_info(evfs, iptr->ino_nr);
+    struct evfs_imap * imap;
     long ret = 0;
     
+    // do not defrag anything created after start time
+    if (iptr->ctime.tv_sec > (u64)args.start_time)
+        return NOT_CHECKED;
+    
+    imap = imap_info(evfs, iptr->ino_nr);
     if (!imap) {
         eprintf("warning: imap_info failed on inode %lu\n", iptr->ino_nr);
         return 0;
@@ -235,7 +243,7 @@ done:
 long defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
 {
     evfs_iter_t * it = inode_iter(evfs, 0);
-    int ret = 0, cnt = 0, nf = 0, ib = 0, total = 0;
+    int ret = 0, cnt = 0, nf = 0, ib = 0, total = 0, nc = 0;
     unsigned long ino_nr;
     
     while ((ino_nr = inode_next(it)) > 0) {
@@ -254,6 +262,8 @@ long defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
             ib++;
         else if (ret == NOT_REGULAR)
             total--;
+        else if (ret == NOT_CHECKED)
+            nc++;
         else if (ret == NOT_FOUND) {
             eprintf("warning: inode removed between inode_iter and inode_info\n");
         }
@@ -265,9 +275,8 @@ long defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
     }
     
     iter_end(it);
-    printf("%d inode(s) scanned. %d defragmented, %d not fragmented, %d busy\n", 
-        total, cnt, nf, ib);
-    
+    printf("%d inode(s) scanned. %d defragmented, %d not fragmented, %d busy, "
+        "%d ignored\n", total, cnt, nf, ib, nc);
     return ret;
 }
 
@@ -307,6 +316,7 @@ int main(int argc, const char * argv[])
         return usage(optcon, 1, "Must specify mount point", "e.g., ~/my-disk");
     }
     
+    args.start_time = time(NULL);
     evfs = evfs_open(args.devname);
     if (evfs == NULL) {
         fprintf(stderr, "Error: evfs_open failed\n");
