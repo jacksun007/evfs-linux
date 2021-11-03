@@ -177,7 +177,7 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
     }
           
 #ifdef VERBOSE
-    printf("Defragmenting inode %lu\n", ino_nr); 
+    printf("Defragmenting inode %lu, size = %lu\n", ino_nr, inode.bytesize); 
 #endif   
     
     // calculate how many blocks need to be allocated
