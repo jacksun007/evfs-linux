@@ -460,7 +460,11 @@ retry:
 		err = evfs_remove_my_extent(filp, &extent);
 		if (err < 0)
 			goto clean_imap;
+
+		imap->entry[i].assigned = 1;
 	}
+
+	copy_to_user(op.imap, imap, sizeof(struct evfs_imap) + imap->count * sizeof(struct evfs_imentry));
 
 sync_bdev:
 	fsync_bdev(sb->s_bdev);
@@ -614,6 +618,7 @@ __ext4_evfs_extent_free(struct super_block * sb, const struct evfs_extent * ext)
 	ext4_fsblk_t block;
 	handle_t *handle = NULL;
 	int err = 0, len;
+	int locked_here = 0;
 
 	block = ext->addr;
 
@@ -649,18 +654,25 @@ __ext4_evfs_extent_free(struct super_block * sb, const struct evfs_extent * ext)
 		goto out;
 	}
 
-	mb_free_blocks(NULL, &e4b, off_block, fex.fe_len);
-	mb_clear_bits(bitmap_bh->b_data, fex.fe_start, fex.fe_len);
+	if (!spin_is_locked(ext4_group_lock_ptr(sb, group))) {
+		locked_here = 1;
+		ext4_lock_group(sb, group);
+	}
 
-	len = ext4_free_group_clusters(sb, gdp) + fex.fe_len;
-	grp = ext4_get_group_info(sb, group);
-	grp->bb_free += fex.fe_len;
+	EXT4_MB_GRP_CLEAR_TRIMMED(e4b.bd_info);
+
+	mb_clear_bits(bitmap_bh->b_data, fex.fe_start, fex.fe_len);
+	mb_free_blocks(NULL, &e4b, off_block, fex.fe_len);
+
+	len = ext4_free_group_clusters(sb, gdp) + EXT4_NUM_B2C(sbi, fex.fe_len);
 	ext4_free_group_clusters_set(sb, gdp, len);
 	ext4_block_bitmap_csum_set(sb, group, gdp, bitmap_bh);
 	ext4_group_desc_csum_set(sb, group, gdp);
 
+	if (locked_here)
+		ext4_unlock_group(sb, group);
+
 	ext4_mb_unload_buddy(&e4b);
-	percpu_counter_add(&sbi->s_freeclusters_counter, fex.fe_len);
 
 	if (sbi->s_log_groups_per_flex) {
 		ext4_group_t flex_group = ext4_flex_group(sbi, group);
@@ -728,7 +740,7 @@ ext4_evfs_extent_alloc(struct file * filp, struct evfs_opentry * op)
 		return -EFAULT;
 
 	if (!extent.addr) {
-		ext4_msg(sb, KERN_ERR, "Extent address is still NULL after lock");
+		ext4_msg(sb, KERN_INFO, "Extent address is still NULL after lock");
 		return -ENOMEM;
 	}
 
@@ -745,10 +757,10 @@ ext4_evfs_extent_alloc(struct file * filp, struct evfs_opentry * op)
 	ac.ac_g_ex.fe_len = extent.len;
 	ac.ac_found = 0;
 	ac.ac_status = AC_STATUS_CONTINUE;
-	ac.ac_flags = EXT4_MB_HINT_TRY_GOAL | EXT4_MB_EVFS;
+	ac.ac_flags = EXT4_MB_HINT_GOAL_ONLY | EXT4_MB_HINT_TRY_GOAL | EXT4_MB_EVFS;
 	ac.ac_inode = NULL;
 
-	printk("Alloc called for addr %lu in group %d\n", extent.addr, group);
+	printk("Alloc called for addr %lu length %lu\n", extent.addr, extent.len);
 
 	/* TODO: Obsolete now? */
 	/* if (ext_op.flags & EVFS_EXTENT_ALLOC_FIXED) { */
@@ -764,6 +776,7 @@ ext4_evfs_extent_alloc(struct file * filp, struct evfs_opentry * op)
 
 	if (ac.ac_status != AC_STATUS_FOUND) {
 		ext4_msg(sb, KERN_ERR, "Failed to find space");
+		err = -ENOMEM;
 		goto out;
 	}
 
@@ -781,8 +794,7 @@ ext4_evfs_extent_alloc(struct file * filp, struct evfs_opentry * op)
 		goto out;
 	}
 
-	err = group * EXT4_BLOCKS_PER_GROUP(sb) + ac.ac_b_ex.fe_start;
-
+	err = ac.ac_b_ex.fe_group * EXT4_BLOCKS_PER_GROUP(sb) + ac.ac_b_ex.fe_start;
 out:
 	return err;
 }
@@ -964,31 +976,81 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	unsigned long addr = lkb->object_id, len;
 	struct evfs_extent_alloc_op op;
 	struct evfs_extent_attr attr;
-	long ret;
-	
+	int cr = 3;
+	long ret, err;
+
 	ret = evfs_copy_extent_alloc(&op, &attr, lkb->entry->data);
 	if (ret < 0)
 	    return ret;
 
 	len = op.extent.len;
-	ext4_get_group_no_and_offset(sb, addr, &group, &offset);
 
 	if (!addr) {
-		for (group = 0; group < ext4_get_groups_count(sb); group++) {
-			/* Ensure that the group is loaded first */
-			ext4_mb_load_buddy(sb, group, &e4b);
-			grp = ext4_get_group_info(sb, group);
-			ext4_mb_unload_buddy(&e4b);
-			if (len <= grp->bb_free) {
-				op.extent.addr = group * EXT4_BLOCKS_PER_GROUP(sb)
-					             + grp->bb_first_free;
-			    copy_to_user(lkb->entry->data, &op, sizeof(struct evfs_extent));
-				goto lock;
+		ext4_group_t ngroups = ext4_get_groups_count(sb);
+		struct ext4_allocation_context ac = { 0 };
+
+		ac.ac_sb = sb;
+		ac.ac_g_ex.fe_len = len;
+		ac.ac_criteria = cr;
+		ac.ac_2order = 0;
+
+		printk("Checking for size length %lu\n", len);
+
+		for (group = 0; group < ngroups; group++) {
+			int ret = 0;
+
+			cond_resched();
+
+			ac.ac_g_ex.fe_group = group;
+
+			ret = ext4_mb_good_group(&ac, group, cr);
+			if (ret <= 0)
+				continue;
+
+			err = ext4_mb_load_buddy(sb, group, &e4b);
+			if (err)
+				return err;
+
+			ac.ac_groups_scanned++;
+
+			ext4_lock_group(sb, group);
+			
+			/*
+			 * We need to check again after locking
+			 * the block group
+			 */
+			ret = ext4_mb_good_group(&ac, group, cr);
+			if (ret <= 0) {
+				ext4_unlock_group(sb, group);
+				ext4_mb_unload_buddy(&e4b);
+				continue;
 			}
+
+			ext4_mb_complex_scan_group_nouse(&ac, &e4b);
+			ext4_mb_unload_buddy(&e4b);
+
+			if (ac.ac_status == AC_STATUS_FOUND &&
+					ac.ac_b_ex.fe_len >= op.extent.len) {
+				break;
+			}
+
+			ext4_unlock_group(sb, group);
 		}
-		return -ENOMEM;
+
+		if (ac.ac_status != AC_STATUS_FOUND) {
+			printk("ext evfs: Failed to find extent\n");
+			return -ENAVAIL;
+		}
+
+		op.extent.addr = ac.ac_b_ex.fe_group * EXT4_BLOCKS_PER_GROUP(sb)
+			+ ac.ac_b_ex.fe_start;
+		lkb->object_id = op.extent.addr;
+		copy_to_user(lkb->entry->data, &op, sizeof(struct evfs_extent));
+		group = ac.ac_b_ex.fe_group;
+		goto out;
 	}
 
+	ext4_get_group_no_and_offset(sb, addr, &group, &offset);
 	grp = ext4_get_group_info(sb, group);
 
 	/* Ensure that the group is loaded first */
@@ -1003,10 +1065,8 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	}
 
 lock:
-	printk("Locking group %d\n", group);
-
 	ext4_lock_group(sb, group);
-
+out:
 	return 0;
 }
 
