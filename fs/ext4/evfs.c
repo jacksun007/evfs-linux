@@ -358,7 +358,7 @@ ext4_evfs_imap_entry(struct inode * inode, struct evfs_imentry * entry)
 	map.m_len = entry->len;
 
 	err = ext4_ext_map_blocks(handle, inode, &map, EXT4_GET_BLOCKS_EVFS_MAP);
-	inode->i_blocks += entry->len;
+	dquot_alloc_block_nofail(inode, map.m_len);
 
 	return err;
 }
