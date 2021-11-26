@@ -168,7 +168,7 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
         return NOT_CHECKED;
 
     // TODO: need this for now because f2fs does not support directory fiemap
-    if (!S_ISREG(inode.mode)) {
+    if (!S_ISREG(inode.mode) || inode.prop.inlined_bytes) {
         return NOT_REGULAR;
     }
 

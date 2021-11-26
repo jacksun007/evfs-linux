@@ -21,6 +21,7 @@
  * mballoc.c contains the multiblocks allocation routines
  */
 
+#include "ext4.h"
 #include "ext4_jbd2.h"
 #include "mballoc.h"
 #include <linux/log2.h>
@@ -1856,6 +1857,73 @@ void ext4_mb_simple_scan_group(struct ext4_allocation_context *ac,
  * In order to optimize scanning, caller must pass number of
  * free blocks in the group, so the routine can know upper limit.
  */
+noinline_for_stack
+void ext4_mb_complex_scan_group_nouse(struct ext4_allocation_context *ac,
+					struct ext4_buddy *e4b)
+{
+	struct super_block *sb = ac->ac_sb;
+	void *bitmap = e4b->bd_bitmap;
+	struct ext4_free_extent ex;
+	int i;
+	int free;
+
+	free = e4b->bd_info->bb_free;
+	BUG_ON(free <= 0);
+
+	i = e4b->bd_info->bb_first_free;
+
+	while (free) {
+		i = mb_find_next_zero_bit(bitmap,
+						EXT4_CLUSTERS_PER_GROUP(sb), i);
+		if (i >= EXT4_CLUSTERS_PER_GROUP(sb)) {
+			/*
+			 * IF we have corrupt bitmap, we won't find any
+			 * free blocks even though group info says we
+			 * we have free blocks
+			 */
+			ext4_grp_locked_error(sb, e4b->bd_group, 0, 0,
+					"%d free clusters as per "
+					"group info. But bitmap says 0",
+					free);
+			break;
+		}
+
+		mb_find_extent(e4b, i, ac->ac_g_ex.fe_len, &ex);
+		BUG_ON(ex.fe_len <= 0);
+		if (free < ex.fe_len) {
+			ext4_grp_locked_error(sb, e4b->bd_group, 0, 0,
+					"%d free clusters as per "
+					"group info. But got %d blocks",
+					free, ex.fe_len);
+			/*
+			 * The number of free blocks differs. This mostly
+			 * indicate that the bitmap is corrupt. So exit
+			 * without claiming the space.
+			 */
+			break;
+		}
+		ex.fe_logical = 0xDEADC0DE; /* debug value */
+
+		if (ex.fe_len >= ac->ac_g_ex.fe_len) {
+			ac->ac_status = AC_STATUS_FOUND;
+			ac->ac_b_ex.fe_start = ex.fe_start;
+			ac->ac_b_ex.fe_group = ex.fe_group;
+			ac->ac_b_ex.fe_len = ex.fe_len;
+			break;
+		}
+
+		i += ex.fe_len;
+		free -= ex.fe_len;
+	}
+
+	// ext4_mb_check_limits(ac, e4b, 1);
+}
+
+/*
+ * The routine scans the group and measures all found extents.
+ * In order to optimize scanning, caller must pass number of
+ * free blocks in the group, so the routine can know upper limit.
+ */
 static noinline_for_stack
 void ext4_mb_complex_scan_group(struct ext4_allocation_context *ac,
 					struct ext4_buddy *e4b)
@@ -1958,7 +2026,7 @@ void ext4_mb_scan_aligned(struct ext4_allocation_context *ac,
  * for the allocation or not. In addition it can also return negative
  * error code when something goes wrong.
  */
-static int ext4_mb_good_group(struct ext4_allocation_context *ac,
+int ext4_mb_good_group(struct ext4_allocation_context *ac,
 				ext4_group_t group, int cr)
 {
 	unsigned free, fragments;
@@ -4766,7 +4834,10 @@ do_more:
 		count -= overflow;
 	}
 	count_clusters = EXT4_NUM_B2C(sbi, count);
-	bitmap_bh = ext4_read_block_bitmap(sb, block_group);
+	if (flags & EXT4_MB_EVFS)
+		bitmap_bh = ext4_read_block_bitmap_nolock(sb, block_group);
+	else
+		bitmap_bh = ext4_read_block_bitmap(sb, block_group);
 	if (IS_ERR(bitmap_bh)) {
 		err = PTR_ERR(bitmap_bh);
 		bitmap_bh = NULL;
@@ -4841,7 +4912,8 @@ do_more:
 		new_entry->efd_count = count_clusters;
 		new_entry->efd_tid = handle->h_transaction->t_tid;
 
-		ext4_lock_group(sb, block_group);
+		if (!(flags & EXT4_MB_EVFS))
+			ext4_lock_group(sb, block_group);
 		mb_clear_bits(bitmap_bh->b_data, bit, count_clusters);
 		ext4_mb_free_metadata(handle, &e4b, new_entry);
 	} else {
@@ -4860,7 +4932,8 @@ do_more:
 		} else
 			EXT4_MB_GRP_CLEAR_TRIMMED(e4b.bd_info);
 
-		ext4_lock_group(sb, block_group);
+		if (!(flags & EXT4_MB_EVFS))
+			ext4_lock_group(sb, block_group);
 		mb_clear_bits(bitmap_bh->b_data, bit, count_clusters);
 		mb_free_blocks(inode, &e4b, bit, count_clusters);
 	}
@@ -4869,7 +4942,8 @@ do_more:
 	ext4_free_group_clusters_set(sb, gdp, ret);
 	ext4_block_bitmap_csum_set(sb, block_group, gdp, bitmap_bh);
 	ext4_group_desc_csum_set(sb, block_group, gdp);
-	ext4_unlock_group(sb, block_group);
+	if (!(flags & EXT4_MB_EVFS))
+		ext4_unlock_group(sb, block_group);
 
 	if (sbi->s_log_groups_per_flex) {
 		ext4_group_t flex_group = ext4_flex_group(sbi, block_group);

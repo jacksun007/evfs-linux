@@ -171,11 +171,12 @@ static inline struct evfs_extent * group_to_extent(struct evfs_group * group)
 static inline int
 rmap_to_metadata(struct evfs_metadata * md, const struct evfs_rmap * rm, int i)
 {
+    // NOTE: Using error code here causes evfs compilation to fail
     if (md == NULL || rm == NULL)
-        return -EINVAL;
+        return -1;
     
     if (i < 0 || i >= rm->count)
-        return -EINVAL;
+        return -1;
         
     // TODO: the actual copy
 }

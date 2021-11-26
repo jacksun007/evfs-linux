@@ -2371,15 +2371,12 @@ ext4_ext_put_gap_in_cache(struct inode *inode, ext4_lblk_t hole_start,
 			      EXTENT_STATUS_HOLE);
 }
 
-/*
- * ext4_ext_rm_idx:
- * removes index from the index block.
- */
-static int ext4_ext_rm_idx(handle_t *handle, struct inode *inode,
-			struct ext4_ext_path *path, int depth)
+static int __ext4_ext_rm_idx(handle_t *handle, struct inode *inode,
+			struct ext4_ext_path *path, int depth, int flags)
 {
 	int err;
 	ext4_fsblk_t leaf;
+	int free_blocks_flags = EXT4_FREE_BLOCKS_METADATA | EXT4_FREE_BLOCKS_FORGET;
 
 	/* free index block */
 	depth--;
@@ -2406,8 +2403,9 @@ static int ext4_ext_rm_idx(handle_t *handle, struct inode *inode,
 	ext_debug("index is empty, remove it, free block %llu\n", leaf);
 	trace_ext4_ext_rm_idx(inode, leaf);
 
-	ext4_free_blocks(handle, inode, NULL, leaf, 1,
-			 EXT4_FREE_BLOCKS_METADATA | EXT4_FREE_BLOCKS_FORGET);
+	if (flags & EXT4_RM_BLOCKS_EVFS_UNMAP)
+		free_blocks_flags |= EXT4_MB_EVFS;
+	ext4_free_blocks(handle, inode, NULL, leaf, 1, free_blocks_flags);
 
 	while (--depth >= 0) {
 		if (path->p_idx != EXT_FIRST_INDEX(path->p_hdr))
@@ -2422,6 +2420,16 @@ static int ext4_ext_rm_idx(handle_t *handle, struct inode *inode,
 			break;
 	}
 	return err;
+}
+
+/*
+ * ext4_ext_rm_idx:
+ * removes index from the index block.
+ */
+static inline int ext4_ext_rm_idx(handle_t *handle, struct inode *inode,
+			struct ext4_ext_path *path, int depth)
+{
+	return __ext4_ext_rm_idx(handle, inode, path, depth, 0);
 }
 
 /*
@@ -2721,12 +2729,10 @@ ext4_ext_rm_leaf(handle_t *handle, struct inode *inode,
 		if (err)
 			goto out;
 
-		if (!(flags & EXT4_RM_BLOCKS_EVFS_UNMAP)) {
-			err = ext4_remove_blocks(handle, inode, ex, partial_cluster,
-						a, b);
-			if (err)
-				goto out;
-		}
+		err = ext4_remove_blocks(handle, inode, ex, partial_cluster,
+					a, b);
+		if (err)
+			goto out;
 
 		if (num == 0)
 			/* this extent is removed; mark slot entirely unused */
@@ -2781,8 +2787,7 @@ ext4_ext_rm_leaf(handle_t *handle, struct inode *inode,
 	 * we zero partial_cluster because we've reached the start of the
 	 * truncated/punched region and we're done removing blocks.
 	 */
-	if (*partial_cluster > 0 && ex >= EXT_FIRST_EXTENT(eh)
-				&& !(flags & EXT4_RM_BLOCKS_EVFS_UNMAP)) {
+	if (*partial_cluster > 0 && ex >= EXT_FIRST_EXTENT(eh)) {
 		pblk = ext4_ext_pblock(ex) + ex_ee_len - 1;
 		if (*partial_cluster != (long long) EXT4_B2C(sbi, pblk)) {
 			ext4_free_blocks(handle, inode, NULL,
@@ -2796,7 +2801,8 @@ ext4_ext_rm_leaf(handle_t *handle, struct inode *inode,
 	/* if this leaf is free, then we should
 	 * remove it from index block above */
 	if (err == 0 && eh->eh_entries == 0 && path[depth].p_bh != NULL)
-		err = ext4_ext_rm_idx(handle, inode, path, depth);
+		err = __ext4_ext_rm_idx(handle, inode, path, depth,
+					(flags & EXT4_RM_BLOCKS_EVFS_UNMAP) ? EXT4_RM_BLOCKS_EVFS_UNMAP : 0);
 
 out:
 	return err;
@@ -3021,7 +3027,9 @@ again:
 				/* index is empty, remove it;
 				 * handle must be already prepared by the
 				 * truncatei_leaf() */
-				err = ext4_ext_rm_idx(handle, inode, path, i);
+				err = __ext4_ext_rm_idx(handle, inode, path,
+							i, (flags & EXT4_RM_BLOCKS_EVFS_UNMAP)
+							? EXT4_RM_BLOCKS_EVFS_UNMAP : 0);
 			}
 			/* root level has p_bh == NULL, brelse() eats this */
 			brelse(path[i].p_bh);
@@ -3040,13 +3048,15 @@ again:
 	 * cluster as well.  (This code will only run when there are no leaves
 	 * to the immediate left of the truncated/punched region.)
 	 */
-	if (partial_cluster > 0 && err == 0
-				&& !(flags & EXT4_RM_BLOCKS_EVFS_UNMAP)) {
+	if (partial_cluster > 0 && err == 0) {
 		/* don't zero partial_cluster since it's not used afterwards */
+		int f = get_default_free_blocks_flags(inode);
+		if (flags & EXT4_RM_BLOCKS_EVFS_UNMAP)
+			f |= EXT4_MB_EVFS;
 		ext4_free_blocks(handle, inode, NULL,
 				 EXT4_C2B(sbi, partial_cluster),
 				 sbi->s_cluster_ratio,
-				 get_default_free_blocks_flags(inode));
+				 f);
 	}
 
 	/* TODO: flexible tree reduction should be here */
