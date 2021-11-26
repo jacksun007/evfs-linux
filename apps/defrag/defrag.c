@@ -196,13 +196,17 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
     // start allocating new contiguous extents. we have to deal with the
     // possibility that the file system has a maximum contiguous extent limit
     while (nr_blocks > 0) {
-        ret = extent_alloc(evfs, 0, extent_size, 0 /* no hint */);
-        if (ret < 0) {
-            goto done;
-        }
-        else if (ret == 0) {
-            ret = -ENOSPC;
-            goto done;
+        u64 try_extent_size = extent_size;
+    
+        while ((ret = extent_alloc(evfs, 0, try_extent_size, 0)) <= 0) {        
+            if (ret < 0) {
+                goto done;
+            }
+            
+            if ((try_extent_size /= 2) == 0) {
+                ret = -ENOSPC;
+                goto done;
+            }
         }
 
         poff = (u64)ret;
