@@ -40,6 +40,12 @@ struct args {
     time_t start_time;
 } args = { NULL, 0, OUT_OF_ORDER, 0 };
 
+typedef struct ext_ll {
+    u64 poff;
+    u64 len;
+    struct ext_ll *next;
+} ext_ll_t;
+
 static long
 atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
                  struct evfs_timeval * mtime);
@@ -150,7 +156,8 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
     struct evfs_inode inode;
     char * data = NULL;
     long ret;
-    u64 poff, loff = 0;
+    // u64 poff, loff = 0;
+    u64 loff = 0;
     u64 nr_blocks;
     struct evfs_imap * imap = NULL;
     u64 extent_size;
@@ -184,7 +191,7 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
     imap = imap_new(evfs);
     nr_blocks = CEILING(inode.bytesize, sb->block_size);       
     extent_size = MIN(nr_blocks, sb->max_extent_size);
-    byte_size = extent_size * sb->block_size;   
+    byte_size = extent_size * sb->block_size;
     
     // set up buffer for copying data to new extents   
     data = malloc(byte_size);
@@ -197,34 +204,68 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
     // possibility that the file system has a maximum contiguous extent limit
     while (nr_blocks > 0) {
         u64 try_extent_size = extent_size;
-    
-        while ((ret = extent_alloc(evfs, 0, try_extent_size, 0)) <= 0) {        
-            if (ret < 0) {
-                goto done;
-            }
-            
-            if ((try_extent_size /= 2) == 0) {
-                ret = -ENOSPC;
-                goto done;
+        u64 extent_left = try_extent_size;
+        ext_ll_t *head = NULL, *tail = NULL;
+
+        // Break down the extent into 2 smaller extents at a time until we
+        // can find an extent size that can fit into the filesystem
+        while (extent_left != 0) {
+            ret = extent_alloc(evfs, 0, try_extent_size, 0);
+            u64 poff = (u64) ret;
+            if (ret <= 0) {
+                if (!(try_extent_size /= 2)) {
+                    ret = -ENOSPC;
+                    goto done;
+                }
+            } else {
+                ext_ll_t *ll = malloc(sizeof(ext_ll_t));
+                ll->poff = poff;
+                ll->len = try_extent_size;
+                ll->next = NULL;
+
+                if (!tail)
+                    head = tail = ll;
+                else {
+                    tail->next = ll;
+                    tail = tail->next;
+                }
+
+                extent_left -= try_extent_size;
             }
         }
 
-        poff = (u64)ret;
-        ret = imap_append(&imap, loff, poff, extent_size);
-        if (ret < 0) {
-            goto done;
-        }   
-           
+        ext_ll_t *curr = head;
+
+        if (!curr) continue;
+
+        while (curr) {
+            imap_append(&imap, loff, curr->poff, curr->len);
+            if (ret < 0)
+                goto done;
+            curr = curr->next;
+        }
+
         ret = inode_read(evfs, ino_nr, loff * sb->block_size, data, byte_size);
         if (ret < 0) {
             goto done;
         }
-        
-        ret = extent_write(evfs, poff, 0, data, byte_size);
-        if (ret < 0) {
-            goto done;     
+
+        u64 off = 0;
+	char *curr_data = data;
+        curr = head;
+        while (curr) {
+            u64 bytesize = curr->len * sb->block_size;
+            curr_data += bytesize;
+            ret = extent_write(evfs, curr->poff, off, data, bytesize);
+            if (ret < 0)
+                goto done;
+            off += bytesize;
+
+            ext_ll_t *prev = curr;
+            curr = curr->next;
+            free(prev);
         }
-        
+
         // prepare for next iteration
         nr_blocks -= extent_size;
         loff += extent_size;

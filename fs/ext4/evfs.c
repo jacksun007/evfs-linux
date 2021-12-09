@@ -1039,7 +1039,7 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 
 		if (ac.ac_status != AC_STATUS_FOUND) {
 			printk("ext evfs: Failed to find extent\n");
-			return -ENAVAIL;
+			return -ENOSPC;
 		}
 
 		op.extent.addr = ac.ac_b_ex.fe_group * EXT4_BLOCKS_PER_GROUP(sb)
