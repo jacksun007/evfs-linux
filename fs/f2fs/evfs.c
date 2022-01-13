@@ -797,7 +797,7 @@ f2fs_evfs_inode_map(struct file * filp, void __user * arg)
 		return -EINVAL;
 	} 
 	else if (!S_ISREG(inode->i_mode)) {
-		f2fs_msg(sb, KERN_ERR, "evfs_inode_unmap: "
+		f2fs_msg(sb, KERN_ERR, "evfs_inode_map: "
 				"can only unmap extent from regular file");
 		ret = -EINVAL;
 		goto clean_inode;
@@ -813,6 +813,11 @@ f2fs_evfs_inode_map(struct file * filp, void __user * arg)
     ret = evfs_imap_from_user(&imap, op.imap);
     if (ret < 0)
         return ret;
+        
+    if (op.flags | EVFS_IMAP_DRY_RUN) {
+        printk("evfs_inode_map: dry run\n");
+        goto clean_imap;
+    }
  
     // unmap first before we map
     for (i = 0; i < imap->count; i++) {

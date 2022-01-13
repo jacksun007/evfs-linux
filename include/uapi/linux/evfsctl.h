@@ -43,6 +43,7 @@ enum evfs_type {
 #define EVFS_META_UNKNOWN 	0xff
 
 #define EVFS_IMAP_UNMAP_ONLY 0x1 /* Only unmap rather than free as well */
+#define EVFS_IMAP_DRY_RUN 0x2    /* dry run the operation */
 
 struct evfs_imap_op {
     u64 ino_nr;

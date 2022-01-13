@@ -251,7 +251,7 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
         }
 
         u64 off = 0;
-	char *curr_data = data;
+        char *curr_data = data;
         curr = head;
         while (curr) {
             u64 bytesize = curr->len * sb->block_size;
@@ -419,14 +419,6 @@ atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
 fail:
     atomic_end(aa);
     return ret;
-
-#if 0
-    (void)evfs;
-    (void)ino_nr;
-    (void)imap;
-    (void)mtime;
-    return 0;
-#endif
 }
 
 
