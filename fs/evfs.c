@@ -605,7 +605,7 @@ evfs_new_atomic_action(struct evfs_atomic_action ** aap, void * arg)
         struct evfs_opentry * entry = &aa->param.item[i];
         if (IS_EVFS_READ_OP(entry->code)) {
             aa->nr_read += 1;
-            printk("evfs: adding %d to read set\n", entry->code);
+            //printk("evfs: adding %d to read set\n", entry->code);
         }
         else if (IS_EVFS_COMP_OP(entry->code)) {
             aa->nr_comp += 1;
