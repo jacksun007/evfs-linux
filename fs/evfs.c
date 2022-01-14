@@ -1044,13 +1044,19 @@ long evfs_imap_from_user(struct evfs_imap ** imptr, void __user * arg)
     if (copy_from_user(&count, arg, sizeof(u32)))
 		return -EFAULT;
 
+    
 	imap_bytes = sizeof(struct evfs_imap) + count*sizeof(struct evfs_imentry);
     imap = kmalloc(imap_bytes, GFP_KERNEL | GFP_NOFS);
 	if (!imap)
 	    return -ENOMEM;
 
-	if (copy_from_user(imap, arg, imap_bytes))
+	if (copy_from_user(imap, arg, imap_bytes)) {
+		kfree(imap);
 		return -EFAULT;
+    }
+
+    printk("imap_from_user: count = %u, capacity = %u, handle = %p\n", 
+            imap->count, imap->capacity, imap->handle);
 
 	*imptr = imap;
     return 0;
@@ -1064,8 +1070,8 @@ evfs_imap_validate_entry(struct file * filp, struct evfs_imentry * entry)
     const struct evfs_extent * ext;
 
     if (entry->inlined) {
-        printk("evfs error: inlined mapping is not supported: la = %lu, "
-        "pa = %lu, len = %lu\n", entry->log_addr, entry->phy_addr, entry->len);
+        printk("evfs error: inlined mapping is not supported: la = %llu, "
+        "pa = %llu, len = %llu\n", entry->log_addr, entry->phy_addr, entry->len);
         return -EINVAL;
     }
 
