@@ -194,6 +194,9 @@ long imap_append(struct evfs_imap ** imptr, u64 la, u64 pa, u64 len)
 void imap_print(const struct evfs_imap * imap)
 {
     unsigned i;
+    printf("imap: count = %u, capacity = %u, handle = %p\n",
+           imap->count, imap->capacity, imap->handle);
+
     for (i = 0; i < imap->count; i++) {
         const struct evfs_imentry * e = &imap->entry[i];
         printf("%u: la = %lu, pa = %lu, len = %lu. %s %s\n",
