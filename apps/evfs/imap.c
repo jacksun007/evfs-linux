@@ -191,6 +191,17 @@ long imap_append(struct evfs_imap ** imptr, u64 la, u64 pa, u64 len)
     return 0;
 }
 
+void imap_print(const struct evfs_imap * imap)
+{
+    unsigned i;
+    for (i = 0; i < imap->count; i++) {
+        const struct evfs_imentry * e = &imap->entry[i];
+        printf("%u: la = %lu, pa = %lu, len = %lu. %s %s\n",
+            e->index, e->log_addr, e->phy_addr, e->len,
+            e->inlined ? "inlined" : "", e->assigned ? "assigned" : "");
+    }       
+}
+
 // TODO (jsun): finalize
 // remove an entry at log_addr
 // the shift flag determines whether to shift all subsequent entries forward

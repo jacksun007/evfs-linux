@@ -82,6 +82,7 @@ struct evfs_imap * imap_new(evfs_t * evfs);
 struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr);
 long imap_append(struct evfs_imap ** imptr, u64 la, u64 pa, u64 len);
 void imap_free(struct evfs_imap * imap);
+void imap_print(const struct evfs_imap * imap);
 
 // reverse mapping
 long reverse_map(evfs_t * evfs, u64 pa, struct evfs_rmap ** rmptr);
