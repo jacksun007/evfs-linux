@@ -1527,7 +1527,7 @@ f2fs_evfs_inode_lock(struct super_block * sb, struct evfs_lockable * lkb)
 	    inode_lock_shared(inode);
 	}
 	
-	printk("evfs info: locked inode %lu\n", inode->i_ino);
+	//printk("evfs info: locked inode %lu\n", inode->i_ino);
 	iput(inode);
 	return 0;
 }
