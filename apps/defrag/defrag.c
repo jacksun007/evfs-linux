@@ -99,6 +99,7 @@ check_small_extents(struct evfs_imap * imap, struct evfs_super_block * sb,
                     struct evfs_inode * iptr)
 {
     int ret = 0;
+    unsigned i;
     u64 max_extent_bytesize = sb->max_extent_size * sb->block_size;
     u64 min_num_extents = CEILING(iptr->bytesize, max_extent_bytesize);
 
@@ -107,6 +108,16 @@ check_small_extents(struct evfs_imap * imap, struct evfs_super_block * sb,
 
     if (imap->count > min_num_extents) {
         ret = 1;
+        
+        for (i = 0; i < imap->count; i++) {
+            struct evfs_imentry * e = &imap->entry[i];     
+            
+            // do not defrag any file with inlined data
+            if (e->inlined) {
+                ret = 0;
+                break;
+            }
+        }
     }
 
     return ret;
@@ -126,7 +137,6 @@ should_defragment(evfs_t * evfs, struct evfs_super_block * sb, struct evfs_inode
         eprintf("warning: imap_info failed on inode %lu\n", iptr->ino_nr);
         return 0;
     } 
-    
     
     switch (args.algo_nr) {
     case OUT_OF_ORDER:
