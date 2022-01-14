@@ -1108,6 +1108,9 @@ evfs_prepare_inode_map(struct file * filp, void __user * arg)
     if (copy_from_user(&op, arg, sizeof(struct evfs_imap_op)) != 0)
         return -EFAULT;
 
+    printk("prepare_inode_map: ino_nr = %llu, flags = %llu, imap = %p\n", 
+           op.ino_nr, op.flags, op.imap);
+
     ret = evfs_imap_from_user(&imap, op.imap);
     if (ret < 0)
         return ret;
