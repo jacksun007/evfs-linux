@@ -1064,7 +1064,8 @@ evfs_imap_validate_entry(struct file * filp, struct evfs_imentry * entry)
     const struct evfs_extent * ext;
 
     if (entry->inlined) {
-        printk("evfs error: inlined mapping is not supported!\n");
+        printk("evfs error: inlined mapping is not supported: la = %lu, "
+        "pa = %lu, len = %lu\n", entry->log_addr, entry->phy_addr, entry->len);
         return -EINVAL;
     }
 
@@ -1104,6 +1105,11 @@ evfs_prepare_inode_map(struct file * filp, void __user * arg)
     ret = evfs_imap_from_user(&imap, op.imap);
     if (ret < 0)
         return ret;
+        
+    if (imap->count == 0) {
+        printk("evfs warning: imap count is 0\n");
+        goto fail;
+    }
 
     // validate entries
     last = &imap->entry[0];
