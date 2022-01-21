@@ -8,28 +8,37 @@
 #include <sys/ioctl.h> 
 #include <stdlib.h>
 #include <assert.h>
+#include <string.h>
+#include <stdio.h>
 #include <errno.h>
 #include <fcntl.h>
 #include "evfslib.h"
 
 
 static struct atomic_action * atomic_action_new(unsigned capacity) {
-    struct atomic_action * aa = malloc(sizeof(struct atomic_action) + 
-        sizeof(struct evfs_opentry)*capacity);
-    
+    const unsigned byte_size = sizeof(struct atomic_action) + 
+                               sizeof(struct evfs_opentry)*capacity;
+    struct atomic_action * aa = malloc(byte_size);
+      
     if (aa != NULL) {
         aa->param.count = 0;
         aa->param.capacity = capacity;
         aa->param.errop = 0;
+        aa->header.magic = ATOMIC_MAGIC;
+        aa->header.atomic = 1;
     }
     
     return aa;
 }
 
-static long
-atomic_action_append(struct atomic_action * aab, int opcode, void * data)
+#define atomic_action_append(aab, opcode, data) \
+    _atomic_action_append((aab), (opcode), &(data), sizeof(data))
+
+static long _atomic_action_append(struct atomic_action * aab, int opcode, 
+                                  void * data, size_t size)
 {
     struct evfs_atomic_action_param * aa = &aab->param;
+    void * realdata = data;
 
     if (aa == NULL) {
         return -EINVAL;
@@ -37,18 +46,22 @@ atomic_action_append(struct atomic_action * aab, int opcode, void * data)
     
     assert(aa->count <= aa->capacity);
     if (aa->count >= aa->capacity) {
-        const unsigned f = 2;
-        aa = realloc(aa, sizeof(struct atomic_action) + 
-                         sizeof(struct evfs_opentry)*aa->capacity*f);
-        if (aa == NULL)
+        fprintf(stderr, "error: realloc for atomic action not implemented\n");
+        return -ENOSYS;
+    }
+    
+    if (aab->header.atomic) {
+        if (!(realdata = malloc(size))) {
             return -ENOMEM;
+        }
         
-        aa->capacity *= f;
+        assert(size != 0);
+        memcpy(realdata, data, size);
     }
     
     aa->item[aa->count].code = opcode;
     aa->item[aa->count].id   = aa->count + 1;
-    aa->item[aa->count].data = data;
+    aa->item[aa->count].data = realdata;
     aa->item[aa->count].result = -ECANCELED;
     aa->count += 1;
     
@@ -59,26 +72,27 @@ atomic_action_append(struct atomic_action * aab, int opcode, void * data)
 static struct atomic_action * to_atomic_action(struct evfs_atomic * ea) {
     struct atomic_action * aa = (struct atomic_action *)ea;
     assert(aa != NULL);
-    assert(aa->header.atomic);
+    assert(aa->header.magic == ATOMIC_MAGIC);
     return aa;
 }
 
-long evfs_operation(struct evfs_atomic * evfs, int opcode, void * data)
+long _evfs_operation(struct evfs_atomic * evfs, int opcode, 
+                     void * data, size_t size)
 {
     long ret;
     struct atomic_action * aa;
 
     if (evfs->atomic) {
         aa = to_atomic_action(evfs);
-        ret = atomic_action_append(aa, opcode, data);
+        ret = _atomic_action_append(aa, opcode, data, size);
     }
     else {
         if (!(aa = atomic_action_new(1))) 
             return -ENOMEM;
         
         aa->header.fd = evfs->fd;
-        aa->header.atomic = 1;
-        ret = atomic_action_append(aa, opcode, data);
+        aa->header.atomic = 0;    /* this states that clean-up not required */
+        ret = _atomic_action_append(aa, opcode, data, 0);
         
         // on successful append, execute the operation
         if (!(ret < 0)) {
@@ -108,10 +122,11 @@ struct evfs_atomic * atomic_begin(evfs_t * evfs) {
     return &aa->header;
 }
 
+
 long atomic_execute(struct evfs_atomic * ea)
 {
     struct atomic_action * aa = to_atomic_action(ea);
-    
+
     /* on the kernel side, we do not send in the header */
     long ret = ioctl(ea->fd, FS_IOC_ATOMIC_ACTION, &aa->param);
     
@@ -124,6 +139,17 @@ long atomic_execute(struct evfs_atomic * ea)
 
 void atomic_end(struct evfs_atomic * ea)
 {
+    if (ea->atomic) {
+        struct atomic_action * aa = to_atomic_action(ea);
+        int i;
+        
+        printf("ea is atomic, freeing\n");
+        for (i = 0; i < aa->param.count; i++) {
+            struct evfs_opentry * item = &aa->param.item[i];
+            free(item->data);
+        }
+    }
+    
     free(ea);
 }
 
@@ -131,23 +157,13 @@ void atomic_end(struct evfs_atomic * ea)
 long atomic_const_equal(struct evfs_atomic * ea, int id, int field, u64 rhs)
 {
     struct atomic_action * aa = to_atomic_action(ea);
-    struct evfs_const_comp * comp = malloc(sizeof(struct evfs_const_comp));
-    long ret;
+    struct evfs_const_comp comp;
+
+    comp.id = id;
+    comp.field = field;
+    comp.rhs = rhs;
     
-    if (!comp) {
-        return -ENOMEM;
-    }
-    
-    comp->id = id;
-    comp->field = field;
-    comp->rhs = rhs;
-    ret = atomic_action_append(aa, EVFS_CONST_EQUAL, comp);
-    if (!ret) {
-        free(comp);
-        return ret;
-    }
-    
-    return 0;
+    return atomic_action_append(aa, EVFS_CONST_EQUAL, comp);
 }
 
 long atomic_result(struct evfs_atomic * ea, int id)

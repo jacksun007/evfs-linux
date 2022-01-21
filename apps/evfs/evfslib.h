@@ -22,9 +22,14 @@
 #define debug(fmt, ...)
 #endif
 
+#define ATOMIC_MAGIC 0xECE326
+
 struct evfs_atomic {
     int fd;
-    int atomic;
+    struct {
+        unsigned atomic : 8;
+        unsigned magic  : 27;
+    };
 };
 
 struct atomic_action {
@@ -43,8 +48,11 @@ typedef struct evfs_iter_s {
     struct evfs_iter_ops op;
 } evfs_iter_t;
 
-
-long evfs_operation(struct evfs_atomic * aa, int opcode, void * data);
+#define evfs_operation(aa, opcode, data) \
+    _evfs_operation(aa, opcode, &(data), sizeof(data))    
+    
+long _evfs_operation(struct evfs_atomic * aa, int opcode, 
+                     void * data, size_t size);
 
 
 #endif // EVFSLIB_H_

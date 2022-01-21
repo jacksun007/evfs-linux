@@ -46,6 +46,7 @@ void imap_free(struct evfs_imap * imap)
             // TODO: free all unassigned physical extents
             if (!entry->assigned) {
                 evfs_t * evfs = (evfs_t *)imap->handle;
+                assert(entry->phy_addr != 0);
                 extent_free(evfs, entry->phy_addr, entry->len, 0);
             } 
         }
@@ -181,7 +182,7 @@ long imap_append(struct evfs_imap ** imptr, u64 la, u64 pa, u64 len)
     
     assert(imap->count <= imap->capacity);
     imap->entry[imap->count].inlined = 0;
-    imap->entry[imap->count].assigned = 0;
+    imap->entry[imap->count].assigned = pa == 0 ? 1 : 0;
     imap->entry[imap->count].index = imap->count;
     imap->entry[imap->count].log_addr = la;
     imap->entry[imap->count].phy_addr = pa;

@@ -29,6 +29,10 @@ print_imap_info(evfs_t * evfs, unsigned ino_nr)
     imap_free(imap);   
 }
 
+static long 
+atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
+                 struct evfs_timeval * mtime);
+
 #define NEW_MSG "hello world"
 
 int main(int argc, char * argv[])
@@ -93,7 +97,7 @@ int main(int argc, char * argv[])
     printf("BEFORE INODE_MAP:\n");
     print_imap_info(evfs, inode.ino_nr);
 
-    ret = inode_map(evfs, inode.ino_nr, imap);
+    ret = atomic_inode_map(evfs, inode.ino_nr, imap, &inode.mtime);
     if (ret < 0) {
         fprintf(stderr, "error: could not map to inode %lu, "
             "errno = %s\n", inode.ino_nr, strerror(-ret));
@@ -122,10 +126,50 @@ int main(int argc, char * argv[])
     print_inode(&inode);
     ret = 0;
 done:
+    printf("FREE IMAP\n");
+    imap_print(imap);
     imap_free(imap);
     evfs_close(evfs);
     return ret;
 error:
     return usage(argv[0]);
+}
+
+static long 
+atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
+                 struct evfs_timeval * mtime)
+{
+    long ret, id;
+    struct evfs_atomic * aa = atomic_begin(evfs);
+    struct evfs_inode inode; 
+    
+    inode.ino_nr = ino_nr;
+    id = inode_info(aa, &inode);
+    if (id < 0) {
+        goto fail;
+    }
+    
+    ret = atomic_const_equal(aa, id, EVFS_INODE_MTIME_TV_SEC, mtime->tv_sec);
+    if (ret < 0) {
+        goto fail;
+    }
+    
+    ret = atomic_const_equal(aa, id, EVFS_INODE_MTIME_TV_USEC, mtime->tv_usec);
+    if (ret < 0) {
+        goto fail;
+    }
+    
+    // for diagnostics
+    imap_print(imap);
+    
+    ret = inode_map(aa, ino_nr, imap);
+    if (ret < 0) {
+        goto fail;
+    }
+    
+    ret = atomic_execute(aa);
+fail:
+    atomic_end(aa);
+    return ret;
 }
 
