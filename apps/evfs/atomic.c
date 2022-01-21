@@ -143,7 +143,6 @@ void atomic_end(struct evfs_atomic * ea)
         struct atomic_action * aa = to_atomic_action(ea);
         int i;
         
-        printf("ea is atomic, freeing\n");
         for (i = 0; i < aa->param.count; i++) {
             struct evfs_opentry * item = &aa->param.item[i];
             free(item->data);

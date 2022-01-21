@@ -1564,7 +1564,7 @@ f2fs_evfs_prepare(struct evfs_atomic_action * aa, struct evfs_opentry * op)
     case EVFS_INODE_MAP:
         /* using generic prepare_inode_map */
         ret = evfs_prepare_inode_map(aa->filp, op->data);
-        printk("prepare_inode_map returned %ld\n", ret);
+        //printk("prepare_inode_map returned %ld\n", ret);
         break;
     case EVFS_EXTENT_ALLOC:
         ret = f2fs_evfs_prepare_extent_alloc(aa->sb, op->data);

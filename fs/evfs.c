@@ -1055,8 +1055,8 @@ long evfs_imap_from_user(struct evfs_imap ** imptr, void __user * arg)
 		return -EFAULT;
     }
 
-    printk("imap_from_user: count = %u, capacity = %u, handle = %p\n", 
-            imap->count, imap->capacity, imap->handle);
+    //printk("imap_from_user: count = %u, capacity = %u, handle = %p\n", 
+    //        imap->count, imap->capacity, imap->handle);
 
 	*imptr = imap;
     return 0;

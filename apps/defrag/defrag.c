@@ -245,7 +245,8 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
             goto done;
         }
 
-        ret = extent_write(evfs, poff, loff, data, byte_size);
+        const u64 intra_block_offset = 0;
+        ret = extent_write(evfs, poff, intra_block_offset, data, byte_size);
         if (ret < 0) {
             eprintf("extent_write: %s\n", strerror(-ret));
             goto done;
@@ -398,10 +399,7 @@ atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
     if (ret < 0) {
         goto fail;
     }
-    
-    // for diagnostics
-    imap_print(imap);
-    
+
     ret = inode_map(aa, ino_nr, imap);
     if (ret < 0) {
         goto fail;
