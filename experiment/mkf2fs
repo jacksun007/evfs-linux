@@ -1,0 +1,20 @@
+#!/bin/bash
+#
+# script to make f2fs
+#
+
+if [ -z "$1" ] || [ -z "$2" ]; then
+        echo "usage: $0 DEV LABEL [DIR]"
+        exit
+fi
+
+# unmount if already mounted
+sudo umount $1 &> /dev/null
+
+# make f2fs
+sudo mkfs.f2fs -l $2 $1
+
+# mount to $3 (if empty, will mount to default directory)
+./mount $1 $3
+
+exit $?

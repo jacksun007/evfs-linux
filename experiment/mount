@@ -1,0 +1,35 @@
+#!/bin/bash
+#
+# mount script
+#
+# Note that this script works better with the NOPASSWD setting for sudo
+#
+
+# the group/user of the partition
+OWNER=sunk
+
+if [ -z "$1" ]; then
+        echo "usage: $0 DEV [MPT]"
+        exit
+fi
+
+if [ -z "$2" ]; then
+        # default mount point
+        MOUNTPOINT="/home/sunk/test-disk"
+else
+        MOUNTPOINT="$2"
+fi
+
+# try to mount if possible
+sudo mount $1 $MOUNTPOINT
+EXITCODE=$?
+if [ "$EXITCODE" -ne 0 ]; then
+        echo "Failed to mount $1."
+        exit $EXITCODE
+fi
+
+sudo chown $OWNER $MOUNTPOINT
+sudo chgrp $OWNER $MOUNTPOINT
+lsblk --output NAME,LABEL,FSTYPE,SIZE,MOUNTPOINT $1
+sudo sync; sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+exit 0

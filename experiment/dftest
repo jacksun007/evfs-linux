@@ -1,0 +1,42 @@
+#!/bin/bash
+#
+# Defragmentation test.
+#
+
+# the partition to copy from (should contain an aged fs)
+FRDISK=/dev/sdb3
+
+# the partition to copy to (warning: will be overwritten!)
+# the size of the partition needs to be at least the size of FRDISK
+TODISK=/dev/sdb1
+
+# where TODISK will be mounted
+MOUNTPOINT=/home/sunk/test-disk
+
+# the defragmentation tool to run
+DEFRAG=/home/sunk/evfs-linux/apps/defrag/defrag
+
+# the directory to store the results
+RESULT=/home/sunk/result/defrag
+
+# OPT should be either -o or -s
+# NAME of the file that stores the output of the defragmentation file
+# NUM is the number of times to run the experiment
+
+if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ]  ; then
+        echo "usage: $0 OPT NAME NUM"
+        exit
+fi
+
+for (( c=1; c<=$3; c++ ))
+do
+        sudo dd bs=16M if=$FRDISK of=$TODISK
+        ./mount $TODISK
+        if [ "$?" -ne 0 ]; then
+            exit $?
+        fi 
+        echo "Trial $c"
+        time sudo $DEFRAG $1 $MOUNTPOINT > $RESULT/$2$c.txt
+        sudo umount $TODISK
+done
+
