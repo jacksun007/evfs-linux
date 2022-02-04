@@ -270,5 +270,10 @@ static inline void ext4_idx_store_pblock(struct ext4_extent_idx *ix,
 int __ext4_ext_dirty(const char *where, unsigned int line, handle_t *handle,
 		     struct inode *inode, struct ext4_ext_path *path);
 
+extern struct buffer_head *
+__read_extent_tree_block(const char *function, unsigned int line,
+			 struct inode *inode, ext4_fsblk_t pblk, int depth,
+			 int flags);
+
 #endif /* _EXT4_EXTENTS */
 
