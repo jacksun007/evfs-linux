@@ -319,6 +319,7 @@ int main(int argc, const char * argv[])
 {
     evfs_t * evfs = NULL;
     struct evfs_super_block sb;
+    const char * temp;
     long ret;
     int c;
 
@@ -350,6 +351,10 @@ int main(int argc, const char * argv[])
     if ((args.devname = poptGetArg(optcon)) == NULL) {
         return usage(optcon, 1, "Must specify mount point", "e.g., ~/my-disk");
     }
+    
+    if ((temp = poptGetArg(optcon)) != NULL) {
+        args.ino_nr = atoi(temp);
+    }    
     
     args.start_time = time(NULL);
     evfs = evfs_open(args.devname);
