@@ -21,26 +21,26 @@ evfs_t * evfs_open(const char * dev)
 {
     evfs_t * evfs = malloc(sizeof(evfs_t));
     long ret;
-    
-    if (!evfs) 
+
+    if (!evfs)
         return NULL;
-        
+
     evfs->atomic = 0;
     evfs->magic = 0;   /* no magic, not atomic! */
-    
+
     evfs->fd = open(dev, O_RDONLY);
 	if (evfs->fd < 0) {
 		perror("open device");
 		goto fail;
 	}
-	
+
 	ret = ioctl(evfs->fd, FS_IOC_EVFS_OPEN, 0);
 	if (ret < 0) {
-	    fprintf(stderr, "error: cannot open '%s' as evfs device. %s\n", 
+	    fprintf(stderr, "error: cannot open '%s' as evfs device. %s\n",
 	            dev, strerror(-ret));
 	    goto fail;
 	}
-	
+
     return evfs;
 fail:
     free(evfs);
@@ -66,8 +66,25 @@ evfs_iter_t * inode_iter(evfs_t * evfs, int flags)
     iter->flags = flags;
     iter->count = 0;
     iter->next_req = 0;
-    
+
     if (ioctl(evfs->fd, FS_IOC_INODE_ITERATE, &iter->op) < 0) {
+        free(iter);
+        return NULL;
+    }
+
+    return iter;
+}
+
+evfs_iter_t * metadata_iter(evfs_t * evfs, u64 ino_nr)
+{
+    evfs_iter_t *iter = malloc(sizeof(evfs_iter_t));
+    iter->evfs = evfs;
+    iter->type = EVFS_TYPE_METADATA;
+    iter->flags = ino_nr;
+    iter->count = 0;
+    iter->next_req = 0;
+
+    if (ioctl(evfs->fd, FS_IOC_METADATA_ITERATE, &iter->op) < 0) {
         free(iter);
         return NULL;
     }
@@ -83,7 +100,7 @@ evfs_iter_t * extent_iter(evfs_t * evfs, int flags)
     iter->flags = flags;
     iter->count = 0;
     iter->next_req = 0;
-    
+
     if (ioctl(evfs->fd, FS_IOC_EXTENT_ITERATE, &iter->op) < 0) {
         free(iter);
         return NULL;
@@ -116,19 +133,41 @@ u64 inode_next(evfs_iter_t * it)
     return *param;
 }
 
+struct evfs_metadata metadata_next(evfs_iter_t * it)
+{
+    struct evfs_metadata *param, ret = { 0 };
+
+    if (it->type != EVFS_TYPE_METADATA)
+        return ret;
+
+    if (it->op.count <= it->count) {
+        it->op.start_from = it->next_req;
+        if (ioctl(it->evfs->fd, FS_IOC_METADATA_ITERATE, &it->op) <= 0)
+            return ret;
+        it->count = 0;
+    }
+
+    param = ((struct evfs_metadata *) it->op.buffer + it->count);
+    ++it->count;
+    it->next_req = param->region_start + param->len;
+    ret = *param;
+
+    return ret;
+}
+
 struct evfs_extent extent_next(evfs_iter_t * it)
 {
     struct evfs_extent *param, ret = { 0 };
     if (it->type != EVFS_TYPE_EXTENT)
         return ret;
-    
+
     if (it->op.count <= it->count) {
         it->op.start_from = it->next_req;
         if (ioctl(it->evfs->fd, FS_IOC_EXTENT_ITERATE, &it->op) <= 0)
-            return ret;   
+            return ret;
         it->count = 0;
     }
-    
+
     param = ((struct evfs_extent *) it->op.buffer) + it->count;
     ++it->count;
     it->next_req = param->addr + param->len;
@@ -144,7 +183,7 @@ void iter_end(evfs_iter_t * it)
 
 long super_info(evfs_t * evfs, struct evfs_super_block * sb)
 {
-    return _evfs_operation(evfs, EVFS_SUPER_INFO, sb, 
+    return _evfs_operation(evfs, EVFS_SUPER_INFO, sb,
                            sizeof(struct evfs_super_block));
 }
 
@@ -153,7 +192,7 @@ long
 extent_operation(evfs_t * evfs, int type, u64 pa, u64 len, int flags)
 {
     struct evfs_extent_op ext_op;
-    
+
     ext_op.extent.addr = pa;
     ext_op.extent.len = len;
     ext_op.flags = flags;
@@ -164,7 +203,7 @@ extent_operation(evfs_t * evfs, int type, u64 pa, u64 len, int flags)
 long extent_alloc(evfs_t * evfs, u64 pa, u64 len, struct evfs_extent_attr * at)
 {
     struct evfs_extent_alloc_op op;
-    
+
     op.extent.addr = pa;
     op.extent.len = len;
     op.attr = at;
@@ -174,7 +213,7 @@ long extent_alloc(evfs_t * evfs, u64 pa, u64 len, struct evfs_extent_attr * at)
 
 long extent_active(evfs_t * evfs, u64 pa, u64 len, int flags)
 {
-    return extent_operation(evfs, EVFS_EXTENT_ACTIVE, pa, len, flags);   
+    return extent_operation(evfs, EVFS_EXTENT_ACTIVE, pa, len, flags);
 }
 
 long extent_free(evfs_t * evfs, u64 pa, u64 len, int flags)
@@ -182,8 +221,8 @@ long extent_free(evfs_t * evfs, u64 pa, u64 len, int flags)
     return extent_operation(evfs, EVFS_EXTENT_FREE, pa, len, flags);
 }
 
-static inline void 
-set_extent_op(struct evfs_ext_rw_op * args, 
+static inline void
+set_extent_op(struct evfs_ext_rw_op * args,
               u64 pa, u64 off, const char * buf, u64 len, u64 flags)
 {
     args->addr = pa;
@@ -200,7 +239,7 @@ long extent_write(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len)
     return evfs_operation(evfs, EVFS_EXTENT_WRITE, args);
 }
 
-long 
+long
 extent_write_unsafe(evfs_t * evfs, u64 pa, u64 off, const char * buf, u64 len)
 {
     struct evfs_ext_rw_op args;
@@ -216,7 +255,6 @@ long extent_read(evfs_t * evfs, u64 pa, u64 off, char * buf, u64 len)
     args.offset = off;
     args.rdata = buf;
     args.len = len;
-    
     return evfs_operation(evfs, EVFS_EXTENT_READ, args);
 }
 
@@ -229,7 +267,7 @@ long inode_info(evfs_t * evfs, struct evfs_inode * inode)
 }
 
 long inode_update(evfs_t * evfs, struct evfs_inode * inode)
-{   
+{
     return inode_operation(evfs, EVFS_INODE_UPDATE, inode);
 }
 

@@ -19,6 +19,8 @@
 #include <linux/buffer_head.h>
 #include <linux/backing-dev.h>
 #include <asm/uaccess.h>
+#include "linux/byteorder/generic.h"
+#include "linux/slab.h"
 #include "mballoc.h"
 #include "ext4_jbd2.h"
 #include "ext4.h"
@@ -538,10 +540,16 @@ ext4_evfs_inode_iter(struct super_block * sb, void __user * arg)
 		unlock_buffer(bh);
 		for (; ino_offset < EXT4_INODES_PER_GROUP(sb); ino_offset++) {
 			if (mb_test_bit(ino_offset, bh->b_data)) {
+				struct ext4_extent_header *eh;
+
 				ino_nr = (group * EXT4_INODES_PER_GROUP(sb)) + ino_offset + 1;
 				inode = ext4_iget(sb, ino_nr);
+				eh = ext_inode_hdr(inode);
 				if (!inode || IS_ERR(inode) || inode->i_state & I_CLEAR)
 					continue;
+				if (eh->eh_entries) {
+					printk("ext_depths for inode %lu = %lu, ext entries = %lu\n", ino_nr, ext_depth(inode), eh->eh_entries);
+				}
 				iput(inode);
 				param = ino_nr;
 				if (evfs_copy_param(&iter, &param, sizeof(u64))) {
@@ -794,7 +802,8 @@ ext4_evfs_extent_alloc(struct file * filp, struct evfs_opentry * op)
 		goto out;
 	}
 
-	err = ac.ac_b_ex.fe_group * EXT4_BLOCKS_PER_GROUP(sb) + ac.ac_b_ex.fe_start;
+	err = ac.ac_b_ex.fe_group * EXT4_BLOCKS_PER_GROUP(sb)
+		+ ac.ac_b_ex.fe_start;
 out:
 	return err;
 }
@@ -858,12 +867,13 @@ ext4_evfs_extent_iter(struct super_block * sb, void __user * arg)
 			int is_set = mb_test_bit(off_block, bh->b_data);
 			if (!is_set && !start_marked) {
 				start_marked = 1;
-				param.addr = (group * EXT4_BLOCKS_PER_GROUP(sb)) + off_block;
+				param.addr = (group *
+					EXT4_BLOCKS_PER_GROUP(sb)) + off_block;
 				param.len = 1;
 			} else if (is_set && start_marked) {
 				start_marked = 0;
 				if (evfs_copy_param(&iter, &param,
-							sizeof(struct evfs_extent))) {
+						sizeof(struct evfs_extent))) {
 					err = 1;
 					goto cleanup;
 				}
@@ -872,7 +882,7 @@ ext4_evfs_extent_iter(struct super_block * sb, void __user * arg)
 				if (param.len == INT_MAX) {
 					start_marked = 0;
 					if (evfs_copy_param(&iter, &param,
-								sizeof(struct evfs_extent))) {
+							sizeof(struct evfs_extent))) {
 						err = 1;
 						goto cleanup;
 					}
@@ -901,6 +911,84 @@ out:
 	if (copy_to_user((struct evfs_iter_ops __user *) arg, &iter,
 				sizeof(struct evfs_iter_ops)))
 		return -EFAULT;
+	return err;
+}
+
+#define read_extent_tree_block(inode, pblk, depth, flags)		\
+	__read_extent_tree_block(__func__, __LINE__, (inode), (pblk),   \
+				 (depth), (flags))
+
+static long ext4_evfs_metadata_iter(struct super_block * sb, void __user * arg)
+{
+	struct evfs_iter_ops iter;
+	struct inode *inode;
+	struct ext4_extent_header *eh;
+	struct ext4_extent *ext;
+	struct ext4_ext_path *path = NULL;
+	struct buffer_head *bh = NULL;
+	int depth = 0, i, ppos = 0;
+	int err = 0;
+
+	if (copy_from_user(&iter, arg, sizeof(iter)))
+		return -EFAULT;
+
+	inode = ext4_iget(sb, iter.ino_nr);
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
+	/*
+	 * TODO (kyokeun): Only support extent based EXT4 file-system for now
+	 *                 Indirect blocks can also be implemented later.
+	 */
+	if (!ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)) {
+		ext4_warning(inode->i_sb, "Inode %lu is not extent based",
+			iter.ino_nr);
+		err = -EFAULT;
+		goto out;
+	}
+
+	eh = ext_inode_hdr(inode);
+	if (!eh->eh_entries) {
+		ext4_warning(inode->i_sb, "Inode %lu does not have any extents",
+				iter.ino_nr);
+		err = -ENOSPC;
+		goto out;
+	}
+	if (iter.start_from > eh->eh_entries) {
+		ext4_warning(inode->i_sb, "Inode %lu has %lu extents but iter"
+				"requests %lu", eh->eh_entries, iter.start_from);
+		err = -ENOSPC;
+		goto out;
+	}
+
+	depth = ext_depth(inode);
+	path = kzalloc(sizeof(struct ext4_ext_path) * (depth + 2), GFP_NOFS);
+	path[0].p_maxdepth = depth + 1;
+	path[0].p_hdr = eh;
+	path[0].p_bh = NULL;
+	
+	while(i) {
+		ext4_msg(sb, KERN_INFO, "depth %d: num %d, max %d\n",
+			ppos, le16_to_cpu(eh->eh_entries), le16_to_cpu(eh->eh_max));
+		path[ppos].p_block = ext4_idx_pblock(path[ppos].p_idx);
+		path[ppos].p_depth = i;
+		path[ppos].p_ext = NULL;
+
+		bh = read_extent_tree_block(inode, path[ppos].p_block, --i, 0);
+
+		if (IS_ERR(bh)) {
+			err = PTR_ERR(bh);
+			goto out;
+		}
+		
+		eh = ext_block_hdr(bh);
+		ppos++;
+		path[ppos].p_bh = bh;
+		path[ppos].p_hdr = eh;
+	}
+
+out:
+	kfree(path);
+	iput(inode);
 	return err;
 }
 
@@ -1064,7 +1152,6 @@ ext4_evfs_ext_group_lock(struct super_block * sb, struct evfs_lockable * lkb)
 		return -ENOMEM;
 	}
 
-lock:
 	ext4_lock_group(sb, group);
 out:
 	return 0;
@@ -1301,6 +1388,8 @@ ext4_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return ext4_evfs_inode_iter(sb, (void *) arg);
 	case FS_IOC_EXTENT_ITERATE:
 		return ext4_evfs_extent_iter(sb, (void *) arg);
+	case FS_IOC_METADATA_ITERATE:
+		return ext4_evfs_metadata_iter(sb, (void *) arg);
 	}
 
 	return -ENOTTY;

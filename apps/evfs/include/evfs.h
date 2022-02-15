@@ -3,7 +3,7 @@
  *
  * Userspace Evfs Library API
  *
- */ 
+ */
 
 #ifndef EVFS_H_
 #define EVFS_H_
@@ -35,13 +35,13 @@ evfs_iter_t * inode_iter(evfs_t * evfs, int flags);
 evfs_iter_t * block_iter(evfs_t * evfs, int flags);     // used space
 evfs_iter_t * extent_iter(evfs_t * evfs, int flags);    // free space
 evfs_iter_t * group_iter(evfs_t * evfs, int flags);     // block group
-evfs_iter_t * metadata_iter(evfs_t * evfs, u64 ino_nr); 
+evfs_iter_t * metadata_iter(evfs_t * evfs, u64 ino_nr);
 
 u64 inode_next(evfs_iter_t * it);
 u64 block_next(evfs_iter_t * it);
 struct evfs_extent extent_next(evfs_iter_t * it);
 struct evfs_group * group_next(evfs_iter_t * it);
-struct evfs_metadata * metadata_next(evfs_iter_t * it);
+struct evfs_metadata metadata_next(evfs_iter_t * it);
 
 // all iterators can be ended using this
 void iter_end(evfs_iter_t * it);
