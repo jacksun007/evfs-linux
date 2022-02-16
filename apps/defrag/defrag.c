@@ -162,8 +162,8 @@ static double map_time = 0.;
 
 static double timespec_subtract(struct timespec * a, struct timespec * b)
 {
-    double x = a->tv_sec + a->tv_nsec / 1000000000;
-    double y = b->tv_sec + b->tv_nsec / 1000000000;
+    double x = a->tv_sec + (double)a->tv_nsec / 1000000000;
+    double y = b->tv_sec + (double)b->tv_nsec / 1000000000;
     return x - y;
 }
 
