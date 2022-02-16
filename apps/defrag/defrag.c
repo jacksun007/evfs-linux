@@ -160,6 +160,12 @@ static double alloc_time = 0.;
 static double copy_time = 0.;
 static double map_time = 0.;
 
+static double timespec_subtract(struct timespec * a, struct timespec * b)
+{
+    double x = a->tv_sec + a->tv_nsec / 1000000000;
+    double y = b->tv_sec + b->tv_nsec / 1000000000;
+    return x - y;
+}
 
 long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr,
                 int should_check)
@@ -172,7 +178,7 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
     struct evfs_imap * imap = NULL;
     u64 extent_size;
     u64 byte_size;
-    clock_t t;
+    struct timespec start, end;
 
     inode.ino_nr = ino_nr;
     if ((ret = inode_info(evfs, &inode)) < 0) {
@@ -217,11 +223,11 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
     // possibility that the file system has a maximum contiguous extent limit 
     while (nr_blocks > 0) {
         do {
-            t = clock();
+            clock_gettime(CLOCK_REALTIME, &start);
             ret = extent_alloc(evfs, 0, extent_size, 0);
             poff = (u64)ret;
-            t = clock() - t;
-            alloc_time += ((double)t)/CLOCKS_PER_SEC;
+            clock_gettime(CLOCK_REALTIME, &end);
+            alloc_time += timespec_subtract(&end, &start);
             
             if (ret == 0) {
                 eprintf("warning: extent_alloc could not allocate %lu blocks\n",
@@ -245,7 +251,7 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
             }
         } while (ret == 0);
         
-        t = clock();
+        clock_gettime(CLOCK_REALTIME, &start);
         ret = imap_append(&imap, loff, poff, extent_size);
         if (ret < 0) {
             eprintf("imap_append: %s\n", strerror(-ret));
@@ -265,8 +271,8 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
             goto done;
         }
         
-        t = clock() - t;
-        copy_time += ((double)t)/CLOCKS_PER_SEC;
+        clock_gettime(CLOCK_REALTIME, &end);
+        copy_time += timespec_subtract(&end, &start);
       
         // prepare for next iteration  
         nr_blocks -= extent_size;
@@ -277,12 +283,12 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
     
     // atomic_execute returns positive value if atomic action is cancelled 
     // due to failed comparison
-    t = clock();
+    clock_gettime(CLOCK_REALTIME, &start);
     ret = atomic_inode_map(evfs, ino_nr, imap, &inode.mtime);
     if (ret > 0)
         ret = INODE_BUSY;
-    t = clock() - t;
-    map_time += ((double)t)/CLOCKS_PER_SEC;
+    clock_gettime(CLOCK_REALTIME, &end);
+    map_time += timespec_subtract(&end, &start);
 
 done:    
     free(data);
