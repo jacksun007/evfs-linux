@@ -36,10 +36,11 @@ enum { OUT_OF_ORDER = 1, SMALL_EXTENT = 2 };
 
 struct args {
     const char * devname;
+    const char * filename;  // list of inode numbers
     int ino_nr;
     int algo_nr;
     time_t start_time;
-} args = { NULL, 0, OUT_OF_ORDER, 0 };
+} args = { NULL, NULL, 0, OUT_OF_ORDER, 0 };
 
 static long
 atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
@@ -156,7 +157,8 @@ should_defragment(evfs_t * evfs, struct evfs_super_block * sb, struct evfs_inode
 }
 
 
-long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr)
+long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr,
+                int should_check)
 {
     struct evfs_inode inode;
     char * data = NULL;
@@ -173,18 +175,20 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
             return NOT_FOUND;
         return ret;
     }
-
-    // do not defrag anything created after start time
-    if (inode.ctime.tv_sec > (u64)args.start_time)
-        return NOT_CHECKED;
-
+    
     // TODO: need this for now because f2fs does not support directory fiemap
     if (!S_ISREG(inode.mode) || inode.prop.inlined_bytes) {
         return NOT_REGULAR;
     }
 
-    if (!should_defragment(evfs, sb, &inode)) {
-        return NOT_FRAGMENTED;
+    if (should_check) {
+        // do not defrag anything created after start time
+        if (inode.ctime.tv_sec > (u64)args.start_time)
+            return NOT_CHECKED;
+
+        if (!should_defragment(evfs, sb, &inode)) {
+            return NOT_FRAGMENTED;
+        }
     }
           
 #ifdef VERBOSE
@@ -278,7 +282,7 @@ long defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
     unsigned long ino_nr;
     
     while ((ino_nr = inode_next(it)) > 0) {
-        ret = defragment(evfs, sb, ino_nr);
+        ret = defragment(evfs, sb, ino_nr, 1);
         total++;
 
         if (ret < 0) {
@@ -315,6 +319,36 @@ long defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
     return ret;
 }
 
+long defragment_some(evfs_t * evfs, struct evfs_super_block * sb, FILE * fp)
+{
+    char * line = NULL;
+    size_t len = 0;
+    int ret = 0, total = 0;
+    
+    while (getline(&line, &len, fp) != -1) {
+        int ino_nr = atoi(line);
+        
+        if (ino_nr <= 0) {
+            fprintf(stderr, "invalid inode number %s\n", line);
+        }
+        
+        ret = defragment(evfs, sb, ino_nr, 0);
+        total++;
+
+        if (ret < 0) {
+            fprintf(stderr, "error while defragmenting inode %d\n", ino_nr);
+            break;
+        }
+    }
+    
+    if (line) {
+        free(line);
+    }
+    
+    printf("%d inode(s) defragmented.\n", total);
+    return ret;
+}
+
 int main(int argc, const char * argv[])
 {
     evfs_t * evfs = NULL;
@@ -327,6 +361,8 @@ int main(int argc, const char * argv[])
     struct poptOption opttab[] = {
         { "out-of-order", 'o', 0, 0, 'o', "use out-of-order algorithm", NULL },
         { "small-extent", 's', 0, 0, 's', "use small extent algorithm", NULL },
+        { NULL,  'f', POPT_ARG_STRING, &args.filename, 0, 
+                 "specify file with inode numbers", NULL},
         POPT_AUTOHELP
         { NULL, 0, 0, 0, 0, NULL, NULL }
     };
@@ -344,6 +380,8 @@ int main(int argc, const char * argv[])
             break;
         case 's':
             args.algo_nr = SMALL_EXTENT;
+            break;
+        default:
             break;
         }
     } 
@@ -368,12 +406,23 @@ int main(int argc, const char * argv[])
 		strerror(-ret));
         goto done;
     }
-
-    if (args.ino_nr == 0) {
+    
+    if (args.filename != NULL) {
+        FILE * f = fopen(args.filename, "rt");
+        
+        if (!f) {
+            fprintf(stderr, "Error: could not open %s\n", args.filename);
+        }
+        else {
+            ret = defragment_some(evfs, &sb, f);
+            fclose(f);
+        }
+    }
+    else if (args.ino_nr == 0) {
         ret = defragment_all(evfs, &sb);
     }
     else {
-        ret = defragment(evfs, &sb, args.ino_nr);
+        ret = defragment(evfs, &sb, args.ino_nr, 0 /* no check */);
     }
     
 done:    
