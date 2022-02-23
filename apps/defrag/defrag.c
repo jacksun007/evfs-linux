@@ -167,10 +167,8 @@ static double timespec_subtract(struct timespec * a, struct timespec * b)
     return x - y;
 }
 
-long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr,
-                int should_check)
+long defragment(evfs_t * evfs, struct evfs_super_block * sb, struct evfs_inode * inode)
 {
-    struct evfs_inode inode;
     char * data = NULL;
     long ret;
     u64 poff, loff = 0;
@@ -179,36 +177,19 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
     u64 extent_size;
     u64 byte_size;
     struct timespec start, end;
-
-    inode.ino_nr = ino_nr;
-    if ((ret = inode_info(evfs, &inode)) < 0) {
-        if (ret == -ENOENT)
-            return NOT_FOUND;
-        return ret;
-    }
     
     // TODO: need this for now because f2fs does not support directory fiemap
-    if (!S_ISREG(inode.mode) || inode.prop.inlined_bytes) {
+    if (!S_ISREG(inode->mode) || inode->prop.inlined_bytes) {
         return NOT_REGULAR;
-    }
-
-    if (should_check) {
-        // do not defrag anything created after start time
-        if (inode.ctime.tv_sec > (u64)args.start_time)
-            return NOT_CHECKED;
-
-        if (!should_defragment(evfs, sb, &inode)) {
-            return NOT_FRAGMENTED;
-        }
     }
           
 #ifdef VERBOSE
-    printf("Defragmenting inode %lu, size = %lu\n", ino_nr, inode.bytesize); 
+    printf("Defragmenting inode %lu, size = %lu\n", inode->ino_nr, inode->bytesize); 
 #endif   
     
     // calculate how many blocks need to be allocated
     imap = imap_new(evfs);
-    nr_blocks = CEILING(inode.bytesize, sb->block_size);       
+    nr_blocks = CEILING(inode->bytesize, sb->block_size);       
     extent_size = MIN(nr_blocks, sb->max_extent_size);
     byte_size = extent_size * sb->block_size;
     
@@ -258,7 +239,7 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
             goto done;
         }
         
-        ret = inode_read(evfs, ino_nr, loff * sb->block_size, data, byte_size);
+        ret = inode_read(evfs, inode->ino_nr, loff * sb->block_size, data, byte_size);
         if (ret < 0) {
             eprintf("inode_read: %s\n", strerror(-ret));
             goto done;
@@ -284,7 +265,7 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_n
     // atomic_execute returns positive value if atomic action is cancelled 
     // due to failed comparison
     clock_gettime(CLOCK_REALTIME, &start);
-    ret = atomic_inode_map(evfs, ino_nr, imap, &inode.mtime);
+    ret = atomic_inode_map(evfs, inode->ino_nr, imap, &inode->mtime);
     if (ret > 0)
         ret = INODE_BUSY;
     clock_gettime(CLOCK_REALTIME, &end);
@@ -296,6 +277,45 @@ done:
     return ret;
 }
 
+
+long try_defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr)
+{
+    struct evfs_inode inode;
+    int ret;
+
+    inode.ino_nr = ino_nr;
+    if ((ret = inode_info(evfs, &inode)) < 0) {
+        if (ret == -ENOENT)
+            return NOT_FOUND;
+        return ret;
+    }
+
+    // do not defrag anything created after start time
+    if (inode.ctime.tv_sec > (u64)args.start_time)
+        return NOT_CHECKED;
+
+    if (!should_defragment(evfs, sb, &inode)) {
+        return NOT_FRAGMENTED;
+    }
+    
+    return defragment(evfs, sb, &inode);  
+}
+
+long always_defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long ino_nr)
+{
+    struct evfs_inode inode;
+    int ret;
+
+    inode.ino_nr = ino_nr;
+    if ((ret = inode_info(evfs, &inode)) < 0) {
+        if (ret == -ENOENT)
+            return NOT_FOUND;
+        return ret;
+    }
+
+    return defragment(evfs, sb, &inode);  
+}
+
 long defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
 {
     evfs_iter_t * it = inode_iter(evfs, 0);
@@ -303,7 +323,7 @@ long defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
     unsigned long ino_nr;
     
     while ((ino_nr = inode_next(it)) > 0) {
-        ret = defragment(evfs, sb, ino_nr, 1);
+        ret = try_defragment(evfs, sb, ino_nr);
         total++;
 
         if (ret < 0) {
@@ -353,7 +373,7 @@ long defragment_some(evfs_t * evfs, struct evfs_super_block * sb, FILE * fp)
             fprintf(stderr, "invalid inode number %s\n", line);
         }
         
-        ret = defragment(evfs, sb, ino_nr, 0);
+        ret = always_defragment(evfs, sb, ino_nr);
         total++;
 
         if (ret < 0) {
@@ -443,7 +463,7 @@ int main(int argc, const char * argv[])
         ret = defragment_all(evfs, &sb);
     }
     else {
-        ret = defragment(evfs, &sb, args.ino_nr, 0 /* no check */);
+        ret = always_defragment(evfs, &sb, args.ino_nr);
     }
     
     printf("alloc_time: %lf\ncopy_time: %lf\nmap_time: %lf\n",
