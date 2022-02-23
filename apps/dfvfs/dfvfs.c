@@ -31,6 +31,9 @@ int process_reg_file(const char * path, const struct stat * stat)
         return out;
     }
     
+    if ((res = posix_fadvise(in, 0, stat->st_size, POSIX_FADV_SEQUENTIAL)) < 0)
+        printf("warning: could not fadvise '%s'\n", path);
+    
     res = sendfile(out, in, NULL, stat->st_size);
     close(in);
     close(out);
