@@ -7,6 +7,7 @@
 
 #include <sys/stat.h>
 #include <stdlib.h>
+#include <assert.h>
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
@@ -117,6 +118,29 @@ check_small_extents(struct evfs_imap * imap, struct evfs_super_block * sb,
             if (e->inlined) {
                 ret = 0;
                 break;
+            }
+        }
+    }
+    else if (iptr->bytesize > max_extent_bytesize) {
+        int small_count = 0;
+        ret = 0;
+    
+        for (i = 0; i < imap->count; i++) {
+            struct evfs_imentry * e = &imap->entry[i];     
+            
+            // this should not be possible except ReiserFS
+            assert(!e->inlined);
+            
+            // if more than 1 extent is smaller than a segment
+            // we will defragment this file
+            if (e->len < sb->max_extent_size) {
+                printf("large file %lu, small extent %lu block(s)\n", 
+                    iptr->bytesize, e->len);
+                       
+                if (++small_count > 1) {
+                    ret = 1;
+                    break;
+                }
             }
         }
     }
