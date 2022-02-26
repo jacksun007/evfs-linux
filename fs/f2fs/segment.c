@@ -1927,7 +1927,7 @@ void change_curseg(struct f2fs_sb_info *sbi, int type, bool reuse)
 	reset_curseg(sbi, type, 1);
 	curseg->alloc_type = SSR;
 	__next_free_blkoff(sbi, curseg, 0);
-    printk("segment %u is now SSR\n", curseg->segno);
+    //printk("segment %u is now SSR\n", curseg->segno);
 
 	if (reuse) {
 		sum_page = get_sum_page(sbi, new_segno);

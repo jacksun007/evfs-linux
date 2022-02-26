@@ -234,7 +234,7 @@ struct evfs_imap_param {
  */
 
 #define FS_IOC_ATOMIC_ACTION _IOWR('f', 69, struct evfs_atomic_action_param)
-#define FS_IOC_IMAP_INFO _IOR('f', 70, struct evfs_imap)
+#define FS_IOC_IMAP_INFO _IOWR('f', 70, struct evfs_imap)
 #define FS_IOC_EXTENT_ITERATE _IOR('f', 71, struct evfs_iter_ops)
 #define FS_IOC_INODE_ITERATE _IOR('f', 72, struct evfs_iter_ops)
 #define FS_IOC_EVFS_OPEN _IOR('f', 73, long)

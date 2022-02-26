@@ -128,8 +128,10 @@ check_small_extents(struct evfs_imap * imap, struct evfs_super_block * sb,
         for (i = 0; i < imap->count; i++) {
             struct evfs_imentry * e = &imap->entry[i];     
             
-            // this should not be possible except ReiserFS
-            assert(!e->inlined);
+            // this shouldn't be possible except for ReiserFS
+            if (e->inlined) {
+                break;
+            }
             
             // if more than 1 extent is smaller than a segment
             // we will defragment this file
@@ -201,11 +203,6 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, struct evfs_inode *
     u64 extent_size;
     u64 byte_size;
     struct timespec start, end;
-    
-    // TODO: need this for now because f2fs does not support directory fiemap
-    if (!S_ISREG(inode->mode) || inode->prop.inlined_bytes) {
-        return NOT_REGULAR;
-    }
           
 #ifdef VERBOSE
     printf("Defragmenting inode %lu, size = %lu\n", inode->ino_nr, inode->bytesize); 
@@ -317,6 +314,11 @@ long try_defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long i
     // do not defrag anything created after start time
     if (inode.ctime.tv_sec > (u64)args.start_time)
         return NOT_CHECKED;
+
+    // TODO: need this for now because f2fs does not support directory fiemap
+    if (!S_ISREG(inode.mode) || inode.prop.inlined_bytes) {
+        return NOT_REGULAR;
+    }
 
     if (!should_defragment(evfs, sb, &inode)) {
         return NOT_FRAGMENTED;

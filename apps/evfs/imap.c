@@ -113,8 +113,11 @@ struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr)
         unsigned size;
     
         // f2fs currently does not support fiemap on directory inodes
-        if (ioctl(evfs->fd, FS_IOC_IMAP_INFO, &param) < 0)
+        if (ioctl(evfs->fd, FS_IOC_IMAP_INFO, &param) < 0) {
+		    fprintf(stderr, "error: FS_IOC_IMAP_INFO (%lu) failed, %s (%d)\n", 
+		        FS_IOC_IMAP_INFO, strerror(errno), errno);
 		    goto fail;
+		}
 
 	    if (fiemap->fm_extent_count >= fiemap->fm_mapped_extents) {
 	        ret = imap_alloc(evfs, fiemap->fm_mapped_extents);
@@ -134,8 +137,10 @@ struct evfs_imap * imap_info(evfs_t * evfs, u64 ino_nr)
 	                     sizeof(struct fiemap_extent) * size);
 	    param.fiemap = fiemap;
             
-	    if (fiemap == NULL)
+	    if (fiemap == NULL) {
+	        fprintf(stderr, "error: could not realloc for %u fiemap_extent\n", size);
             return NULL;
+        }
 
         fiemap->fm_extent_count = size;
 	}
