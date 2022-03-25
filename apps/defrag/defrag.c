@@ -39,9 +39,10 @@ struct args {
     const char * devname;
     const char * filename;  // list of inode numbers
     int ino_nr;
-    int algo_nr;
+    short algo_nr;
+    short dry_run;
     time_t start_time;
-} args = { NULL, NULL, 0, OUT_OF_ORDER, 0 };
+} args = { NULL, NULL, 0, OUT_OF_ORDER, 0, 0 };
 
 static long
 atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
@@ -324,6 +325,10 @@ long try_defragment(evfs_t * evfs, struct evfs_super_block * sb, unsigned long i
         return NOT_FRAGMENTED;
     }
     
+    if (args.dry_run) {
+        return 0;
+    }
+    
     return defragment(evfs, sb, &inode);  
 }
 
@@ -428,6 +433,7 @@ int main(int argc, const char * argv[])
     struct poptOption opttab[] = {
         { "out-of-order", 'o', 0, 0, 'o', "use out-of-order algorithm", NULL },
         { "small-extent", 's', 0, 0, 's', "use small extent algorithm", NULL },
+        { "dry-run", 'd', 0, 0, 'd', "do not actually defragment", NULL },
         { NULL,  'f', POPT_ARG_STRING, &args.filename, 0, 
                  "specify file with inode numbers", NULL},
         POPT_AUTOHELP
@@ -447,6 +453,10 @@ int main(int argc, const char * argv[])
             break;
         case 's':
             args.algo_nr = SMALL_EXTENT;
+            break;
+        case 'd':
+            printf("%s: dry run activated\n", argv[0]);
+            args.dry_run = 1;
             break;
         default:
             break;
