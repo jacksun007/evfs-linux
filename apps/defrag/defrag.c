@@ -236,6 +236,7 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, struct evfs_inode *
                 eprintf("warning: extent_alloc could not allocate %lu blocks\n",
                         extent_size);
                     
+                ret = 0;
                 extent_size /= 2;
                 byte_size /= 2;
             
