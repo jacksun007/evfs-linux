@@ -232,7 +232,7 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, struct evfs_inode *
             clock_gettime(CLOCK_REALTIME, &end);
             alloc_time += timespec_subtract(&end, &start);
             
-            if (ret == 0) {
+            if (ret == 0 || ret == -ENOSPC) {
                 eprintf("warning: extent_alloc could not allocate %lu blocks\n",
                         extent_size);
                     
