@@ -52,7 +52,8 @@ static void file_free_rcu(struct rcu_head *head)
 
 static inline void file_free(struct file *f)
 {
-	percpu_counter_dec(&nr_files);
+	if (!(f->f_mode & FMODE_NOACCOUNT))
+		percpu_counter_dec(&nr_files);
 	call_rcu(&f->f_u.fu_rcuhead, file_free_rcu);
 }
 
@@ -91,41 +92,16 @@ int proc_nr_files(struct ctl_table *table, int write,
 }
 #endif
 
-/* Find an unused file structure and return a pointer to it.
- * Returns an error pointer if some error happend e.g. we over file
- * structures limit, run out of memory or operation is not permitted.
- *
- * Be very careful using this.  You are responsible for
- * getting write access to any mount that you might assign
- * to this filp, if it is opened for write.  If this is not
- * done, you will imbalance int the mount's writer count
- * and a warning at __fput() time.
- */
-struct file *get_empty_filp(void)
+static struct file *__alloc_file(const struct cred *cred)
 {
-	const struct cred *cred = current_cred();
-	static long old_max;
 	struct file *f;
 	int error;
-
-	/*
-	 * Privileged users can go above max_files
-	 */
-	if (get_nr_files() >= files_stat.max_files && !capable(CAP_SYS_ADMIN)) {
-		/*
-		 * percpu_counters are inaccurate.  Do an expensive check before
-		 * we go and fail.
-		 */
-		if (percpu_counter_sum_positive(&nr_files) >= files_stat.max_files)
-			goto over;
-	}
 
 	f = kmem_cache_zalloc(filp_cachep, GFP_KERNEL);
 	if (unlikely(!f))
 		return ERR_PTR(-ENOMEM);
 
-	percpu_counter_inc(&nr_files);
-	f->f_cred = get_cred(cred);
+    f->f_cred = get_cred(cred);
 	error = security_file_alloc(f);
 	if (unlikely(error)) {
 		file_free(f);
@@ -139,6 +115,30 @@ struct file *get_empty_filp(void)
 	eventpoll_init_file(f);
 	/* f->f_version: 0 */
 	return f;
+}
+
+static struct file * __get_empty_filp(const struct cred *cred)
+{
+	static long old_max;
+    struct file *f;
+
+	/*
+	 * Privileged users can go above max_files
+	 */
+	if (get_nr_files() >= files_stat.max_files && !capable(CAP_SYS_ADMIN)) {
+		/*
+		 * percpu_counters are inaccurate.  Do an expensive check before
+		 * we go and fail.
+		 */
+		if (percpu_counter_sum_positive(&nr_files) >= files_stat.max_files)
+			goto over;
+	}
+
+    f = __alloc_file(cred);
+	if (!IS_ERR(f))
+	    percpu_counter_inc(&nr_files);
+	   
+    return f;
 
 over:
 	/* Ran out of filps - report that */
@@ -148,6 +148,45 @@ over:
 	}
 	return ERR_PTR(-ENFILE);
 }
+
+/* Find an unused file structure and return a pointer to it.
+ * Returns an error pointer if some error happend e.g. we over file
+ * structures limit, run out of memory or operation is not permitted.
+ *
+ * Be very careful using this.  You are responsible for
+ * getting write access to any mount that you might assign
+ * to this filp, if it is opened for write.  If this is not
+ * done, you will imbalance int the mount's writer count
+ * and a warning at __fput() time.
+ */
+struct file *get_empty_filp(void)
+{
+	const struct cred *cred = current_cred();
+	return __get_empty_filp(cred);
+}
+
+/*
+ * Variant of alloc_empty_file() that doesn't check and modify nr_files.
+ * 
+ * Based on function of same name from Linux 5.17.
+ *
+ * Should not be used unless there's a very good reason to do so.
+ */
+struct file *alloc_empty_file_noaccount(int flags, const struct cred *cred)
+{
+	struct file *f = __alloc_file(cred);
+
+	if (!IS_ERR(f)) {
+		f->f_mode |= FMODE_NOACCOUNT;
+        
+        /* (jsun): was done in __alloc_file, moved here */
+        f->f_flags = flags;
+	    f->f_mode = OPEN_FMODE(flags);
+    }
+
+	return f;
+}
+
 
 /**
  * alloc_file - allocate and initialize a 'struct file'
