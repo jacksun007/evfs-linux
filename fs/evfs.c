@@ -1047,8 +1047,10 @@ long evfs_imap_from_user(struct evfs_imap ** imptr, void __user * arg)
     
 	imap_bytes = sizeof(struct evfs_imap) + count*sizeof(struct evfs_imentry);
     imap = kmalloc(imap_bytes, GFP_KERNEL | GFP_NOFS);
-	if (!imap)
+	if (!imap) {
+	    printk("imap_from_user: could not alloc %d bytes\n", imap_bytes);
 	    return -ENOMEM;
+    }
 
 	if (copy_from_user(imap, arg, imap_bytes)) {
 		kfree(imap);

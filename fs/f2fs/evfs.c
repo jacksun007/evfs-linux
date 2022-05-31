@@ -811,8 +811,10 @@ f2fs_evfs_inode_map(struct file * filp, void __user * arg)
 
     // get the new mapping requested
     ret = evfs_imap_from_user(&imap, op.imap);
-    if (ret < 0)
+    if (ret < 0) {
+        printk("evfs_inode_map: could not copy from userspace, %ld\n", -ret);
         return ret;
+    }
         
     if (op.flags | EVFS_IMAP_DRY_RUN) {
         printk("evfs_inode_map: dry run\n");
