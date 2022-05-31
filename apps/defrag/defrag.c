@@ -219,6 +219,7 @@ long defragment(evfs_t * evfs, struct evfs_super_block * sb, struct evfs_inode *
     data = malloc(byte_size);
     if (!data) {
         ret = -ENOMEM;
+        eprintf("malloc(%lu) failed during defrag\n", byte_size);
         goto done;
     }      
     
@@ -475,12 +476,12 @@ int main(int argc, const char * argv[])
     args.start_time = time(NULL);
     evfs = evfs_open(args.devname);
     if (evfs == NULL) {
-        fprintf(stderr, "Error: evfs_open failed\n");
+        eprintf("Error: evfs_open failed\n");
         goto done;
     }
     
     if ((ret = super_info(evfs, &sb)) < 0) {
-        fprintf(stderr, "Error: could not retrieve super block info: %s\n",
+        eprintf("Error: could not retrieve super block info: %s\n",
 		strerror(-ret));
         goto done;
     }
@@ -489,7 +490,7 @@ int main(int argc, const char * argv[])
         FILE * f = fopen(args.filename, "rt");
         
         if (!f) {
-            fprintf(stderr, "Error: could not open %s\n", args.filename);
+            eprintf("Error: could not open %s\n", args.filename);
         }
         else {
             ret = defragment_some(evfs, &sb, f);
@@ -519,9 +520,16 @@ atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
     struct evfs_atomic * aa = atomic_begin(evfs);
     struct evfs_inode inode; 
     
+    if (aa == NULL) {
+        ret = -ENOMEM;
+        goto fail;
+    }
+    
     inode.ino_nr = ino_nr;
     id = inode_info(aa, &inode);
     if (id < 0) {
+        ret = id;
+        eprintf("inode_info (atomic): %s\n", strerror(-ret));
         goto fail;
     }
     
@@ -541,6 +549,10 @@ atomic_inode_map(evfs_t * evfs, long ino_nr, struct evfs_imap * imap,
     }
     
     ret = atomic_execute(aa);
+    if (ret < 0) {
+        eprintf("atomic_execute: %s\n", strerror(-ret));
+    }
+    
 fail:
     atomic_end(aa);
     return ret;
