@@ -360,7 +360,8 @@ long defragment_all(evfs_t * evfs, struct evfs_super_block * sb)
         total++;
 
         if (ret < 0) {
-            eprintf("error while defragmenting inode %ld\n", ino_nr);
+            eprintf("error while defragmenting inode %ld, %s\n", ino_nr,
+                strerror(-ret));
             break;
         }
         else if (ret == 0)
