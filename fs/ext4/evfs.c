@@ -377,6 +377,10 @@ ext4_evfs_inode_map(struct file * filp, void __user * arg)
 
 	if (copy_from_user(&op, arg, sizeof(struct evfs_imap_op)) != 0)
 		return -EFAULT;
+    else if (op.flags | EVFS_IMAP_DRY_RUN) {
+        printk("ext4_evfs_inode_map: dry run\n");
+        return 0;
+    }
 
 	/* Check validity of inode before getting the imap */
 	inode = ext4_iget_normal(sb, op.ino_nr);
@@ -482,7 +486,7 @@ ext4_evfs_inode_iter(struct super_block * sb, void __user * arg)
 {
 	struct evfs_iter_ops iter;
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
-	struct inode *inode;
+	struct inode *inode = NULL;
 	struct ext4_group_desc *gdp;
 	struct ext4_group_info *grp;
 	struct buffer_head *bh;
@@ -547,9 +551,10 @@ ext4_evfs_inode_iter(struct super_block * sb, void __user * arg)
 				eh = ext_inode_hdr(inode);
 				if (!inode || IS_ERR(inode) || inode->i_state & I_CLEAR)
 					continue;
-				if (eh->eh_entries) {
-					printk("ext_depths for inode %lu = %lu, ext entries = %lu\n", ino_nr, ext_depth(inode), eh->eh_entries);
-				}
+				//if (eh->eh_entries) {
+				//	printk("ext_depths for inode %lu = %lu, ext entries = %lu\n", 
+				//	    ino_nr, ext_depth(inode), eh->eh_entries);
+				//}
 				iput(inode);
 				param = ino_nr;
 				if (evfs_copy_param(&iter, &param, sizeof(u64))) {
@@ -619,7 +624,7 @@ __ext4_evfs_extent_free(struct super_block * sb, const struct evfs_extent * ext)
 	struct ext4_group_desc *gdp;
 	struct buffer_head *gdp_bh;
 	struct ext4_free_extent fex;
-	struct ext4_group_info *grp = NULL;
+	//struct ext4_group_info *grp = NULL;
 	struct ext4_buddy e4b;
 	ext4_group_t group;
 	ext4_grpblk_t off_block;
@@ -768,7 +773,7 @@ ext4_evfs_extent_alloc(struct file * filp, struct evfs_opentry * op)
 	ac.ac_flags = EXT4_MB_HINT_GOAL_ONLY | EXT4_MB_HINT_TRY_GOAL | EXT4_MB_EVFS;
 	ac.ac_inode = NULL;
 
-	printk("Alloc called for addr %lu length %lu\n", extent.addr, extent.len);
+	printk("Alloc called for addr %llu length %llu\n", extent.addr, extent.len);
 
 	/* TODO: Obsolete now? */
 	/* if (ext_op.flags & EVFS_EXTENT_ALLOC_FIXED) { */
@@ -923,7 +928,7 @@ static long ext4_evfs_metadata_iter(struct super_block * sb, void __user * arg)
 	struct evfs_iter_ops iter;
 	struct inode *inode;
 	struct ext4_extent_header *eh;
-	struct ext4_extent *ext;
+	//struct ext4_extent *ext;
 	struct ext4_ext_path *path = NULL;
 	struct buffer_head *bh = NULL;
 	int depth = 0, i, ppos = 0;
@@ -954,19 +959,20 @@ static long ext4_evfs_metadata_iter(struct super_block * sb, void __user * arg)
 		goto out;
 	}
 	if (iter.start_from > eh->eh_entries) {
-		ext4_warning(inode->i_sb, "Inode %lu has %lu extents but iter"
-				"requests %lu", eh->eh_entries, iter.start_from);
+		ext4_warning(inode->i_sb, "Inode %lu has %d extents but iter"
+				"requests %lu", iter.ino_nr,
+				eh->eh_entries, iter.start_from);
 		err = -ENOSPC;
 		goto out;
 	}
 
-	depth = ext_depth(inode);
+	depth = i = ext_depth(inode);
 	path = kzalloc(sizeof(struct ext4_ext_path) * (depth + 2), GFP_NOFS);
 	path[0].p_maxdepth = depth + 1;
 	path[0].p_hdr = eh;
 	path[0].p_bh = NULL;
 	
-	while(i) {
+	while (i) {
 		ext4_msg(sb, KERN_INFO, "depth %d: num %d, max %d\n",
 			ppos, le16_to_cpu(eh->eh_entries), le16_to_cpu(eh->eh_max));
 		path[ppos].p_block = ext4_idx_pblock(path[ppos].p_idx);
@@ -984,12 +990,19 @@ static long ext4_evfs_metadata_iter(struct super_block * sb, void __user * arg)
 		ppos++;
 		path[ppos].p_bh = bh;
 		path[ppos].p_hdr = eh;
-	}
+	};
 
 out:
 	kfree(path);
 	iput(inode);
 	return err;
+}
+
+static long ext4_evfs_metadata_move(struct super_block * sb, void __user * arg)
+{
+    (void)sb;
+    (void)arg;
+    return -ENOSYS;
 }
 
 static long
@@ -1352,6 +1365,9 @@ ext4_evfs_execute(struct evfs_atomic_action * aa, struct evfs_opentry * op)
 	case EVFS_INODE_MAP:
 		err = ext4_evfs_inode_map(aa->filp, op->data);
 		break;
+    case EVFS_METADATA_MOVE:
+        err = ext4_evfs_metadata_move(aa->sb, op->data);
+        break;
 	default:
 		printk("evfs: unknown opcode %d\n", op->code);
 		err = -ENOSYS;

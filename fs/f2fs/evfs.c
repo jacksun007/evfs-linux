@@ -817,7 +817,7 @@ f2fs_evfs_inode_map(struct file * filp, void __user * arg)
     }
         
     if (op.flags | EVFS_IMAP_DRY_RUN) {
-        printk("evfs_inode_map: dry run\n");
+        printk("f2fs_evfs_inode_map: dry run\n");
         goto clean_imap;
     }
  
@@ -940,6 +940,7 @@ f2fs_evfs_inode_set(struct super_block *sb, void __user * arg)
 	return f2fs_evfs_inode_update(sb, &evfs_i);
 }
 
+static
 long
 f2fs_evfs_inode_iter(struct file *filp, struct super_block *sb, unsigned long arg)
 {
@@ -1112,7 +1113,7 @@ out:
 }
 
 long
-f2fs_evfs_meta_iter(struct super_block *sb, unsigned long arg)
+f2fs_evfs_meta_iter(struct file *filp, struct super_block *sb, unsigned long arg)
 {
 	struct evfs_iter_ops iter;
 	struct __evfs_meta_iter param;
@@ -1168,6 +1169,8 @@ f2fs_evfs_meta_iter(struct super_block *sb, unsigned long arg)
 		}
 	}
 
+    (void)filp;
+    
 out:
 	if (copy_to_user((struct evfs_iter_ops __user *) arg, &iter,
 				sizeof(struct evfs_iter_ops)))
@@ -1760,8 +1763,9 @@ f2fs_evfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return f2fs_evfs_extent_iter(filp, sb, arg);
 	case FS_IOC_INODE_ITERATE:
 		return f2fs_evfs_inode_iter(filp, sb, arg);
-    case FS_IOC_BLOCK_ITERATE:
     case FS_IOC_METADATA_ITERATE:
+        return f2fs_evfs_meta_iter(filp, sb, arg);
+    case FS_IOC_BLOCK_ITERATE:
         break;
 	}
 
